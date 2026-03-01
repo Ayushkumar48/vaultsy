@@ -3,40 +3,17 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
-	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { Separator } from '$lib/components/ui/separator';
 	import { EnvironmentType } from '$lib/shared/enums';
-	import {
-		addSecret,
-		cleanSecrets,
-		createEnvironmentState,
-		handleAutoRow,
-		handleEnvPaste,
-		isValidKey,
-		removeSecret
-	} from '$lib/features/env-manager';
-	import { cn } from '$lib/utils';
+	import { createEnvironmentState, cleanSecrets, isValidKey } from '$lib/features/env-manager';
+	import EnvEditor from '$lib/components/custom/env-editor.svelte';
 
 	let title = $state('');
 
 	let environments = $state(createEnvironmentState(EnvironmentType));
-
-	function handlePaste(event: ClipboardEvent, env: string) {
-		const updated = handleEnvPaste(event, environments[env]);
-		if (updated) environments[env] = updated;
-	}
-
-	function onAdd(env: string) {
-		environments[env] = addSecret(environments[env]);
-	}
-
-	function onRemove(env: string, index: number) {
-		environments[env] = removeSecret(environments[env], index);
-	}
-
-	function onAutoRow(env: string) {
-		environments[env] = handleAutoRow(environments[env]);
-	}
+	const hasInvalidKeys = $derived(
+		Object.values(environments).some((rows) => rows.some((r) => r.key && !isValidKey(r.key)))
+	);
 
 	async function createProject() {
 		const cleaned = Object.fromEntries(
@@ -69,50 +46,12 @@
 
 				<Separator />
 
-				<Tabs value="development">
-					<TabsList class="grid w-full grid-cols-4">
-						{#each EnvironmentType as env (env)}
-							<TabsTrigger value={env}>
-								{env[0].toUpperCase() + env.slice(1)}
-							</TabsTrigger>
-						{/each}
-					</TabsList>
-
-					{#each EnvironmentType as env (env)}
-						<TabsContent value={env}>
-							<div class="mt-6 space-y-4" onpaste={(e) => handlePaste(e, env)}>
-								{#each environments[env] as secret, index (index)}
-									<div class="flex items-center gap-3">
-										<Input
-											placeholder="KEY"
-											bind:value={secret.key}
-											oninput={() => onAutoRow(env)}
-											class={cn(secret.key && !isValidKey(secret.key) ? 'border-red-500' : '')}
-										/>
-
-										<Input
-											placeholder="VALUE"
-											type="password"
-											bind:value={secret.value}
-											oninput={() => onAutoRow(env)}
-										/>
-
-										<Button variant="destructive" size="sm" onclick={() => onRemove(env, index)}>
-											X
-										</Button>
-									</div>
-								{/each}
-
-								<Button variant="outline" onclick={() => onAdd(env)}>+ Add Secret</Button>
-							</div>
-						</TabsContent>
-					{/each}
-				</Tabs>
+				<EnvEditor bind:environments />
 			</CardContent>
 		</Card>
 
 		<div class="flex justify-end">
-			<Button size="lg" onclick={createProject}>Create Project</Button>
+			<Button size="lg" onclick={createProject} disabled={hasInvalidKeys}>Create Project</Button>
 		</div>
 	</div>
 </div>

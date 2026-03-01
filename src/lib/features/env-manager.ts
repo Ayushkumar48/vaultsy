@@ -136,3 +136,10 @@ export function handleAutoRow(rows: SecretRow[]) {
 
 	return rows;
 }
+
+export function getKeyError(key: string): string | null {
+	if (!key) return null;
+	if (!/^[A-Z_]/.test(key)) return 'Must start with a letter or underscore.';
+	if (!/^[A-Z0-9_]+$/.test(key)) return 'Only A–Z, 0–9 and underscore allowed.';
+	return null;
+}
