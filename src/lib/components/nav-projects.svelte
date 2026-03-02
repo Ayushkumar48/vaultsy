@@ -15,6 +15,8 @@
 	import { deleteProject } from '../../routes/(main)/dashboard/projects/new/project.remote';
 	import { toast } from 'svelte-sonner';
 	import { page } from '$app/state';
+	import { cn } from '$lib/utils';
+	import { buttonVariants } from './ui/button';
 
 	let isLoading = $state(false);
 	let deleteProjectId = $state<string | null>(null);
@@ -60,45 +62,52 @@
 				Loading...
 			</Sidebar.MenuItem>
 		{:else}
-			{#each projectsQuery.current as item, index (item.id)}
-				<DropdownMenu.Root>
-					<DropdownMenu.Trigger>
-						{#snippet child({ props })}
-							<Sidebar.MenuButton {...props} tooltipContent={item.title}>
-								<span>{index + 1}. {item.title}</span>
-								<EllipsisIcon class="ms-auto transition-transform duration-200" />
-							</Sidebar.MenuButton>
-						{/snippet}
-					</DropdownMenu.Trigger>
-					<DropdownMenu.Content align="start" side="right" class="w-56">
-						<DropdownMenu.Item onclick={() => goto(resolve(`/dashboard/projects/${item.id}`))}>
-							<FolderIcon class="text-muted-foreground" />
-							<span>View Project</span>
-						</DropdownMenu.Item>
-						<DropdownMenu.Item
-							onclick={() => goto(resolve(`/dashboard/projects/${item.id}/share`))}
+			<div class="space-y-2">
+				{#each projectsQuery.current as item, index (item.id)}
+					<div class="flex items-center justify-between rounded-md">
+						<Sidebar.MenuButton
+							tooltipContent={item.title}
+							onclick={() => goto(resolve(`/dashboard/projects/${item.id}`))}
 						>
-							<ForwardIcon class="text-muted-foreground" />
-							<span>Share Project</span>
-						</DropdownMenu.Item>
-						<DropdownMenu.Item
-							onSelect={(e) => {
-								e.preventDefault();
-								deleteProjectId = item.id;
-							}}
-						>
-							<Trash2Icon class="text-muted-foreground" />
-							<span>Delete Project</span>
-						</DropdownMenu.Item>
-					</DropdownMenu.Content>
-				</DropdownMenu.Root>
-			{:else}
-				<Sidebar.MenuItem>
-					<p class="px-4 py-2 text-sm text-muted-foreground group-data-[collapsible=icon]:hidden">
-						No Projects yet.
-					</p>
-				</Sidebar.MenuItem>
-			{/each}
+							<span>{index + 1}. {item.title}</span>
+						</Sidebar.MenuButton>
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger
+								class={cn(buttonVariants({ variant: 'ghost', size: 'icon-sm' }))}
+							>
+								<EllipsisIcon />
+							</DropdownMenu.Trigger>
+							<DropdownMenu.Content align="start" side="right" class="w-56">
+								<DropdownMenu.Item onclick={() => goto(resolve(`/dashboard/projects/${item.id}`))}>
+									<FolderIcon class="text-muted-foreground" />
+									<span>View Project</span>
+								</DropdownMenu.Item>
+								<DropdownMenu.Item
+									onclick={() => goto(resolve(`/dashboard/projects/${item.id}/share`))}
+								>
+									<ForwardIcon class="text-muted-foreground" />
+									<span>Share Project</span>
+								</DropdownMenu.Item>
+								<DropdownMenu.Item
+									onSelect={(e) => {
+										e.preventDefault();
+										deleteProjectId = item.id;
+									}}
+								>
+									<Trash2Icon class="text-muted-foreground" />
+									<span>Delete Project</span>
+								</DropdownMenu.Item>
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					</div>
+				{:else}
+					<Sidebar.MenuItem>
+						<p class="px-4 py-2 text-sm text-muted-foreground group-data-[collapsible=icon]:hidden">
+							No Projects yet.
+						</p>
+					</Sidebar.MenuItem>
+				{/each}
+			</div>
 
 			{#if projectsQuery.current && projectsQuery.current.length > 0}
 				<Sidebar.MenuItem>

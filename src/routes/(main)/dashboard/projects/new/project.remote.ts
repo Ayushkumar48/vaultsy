@@ -81,8 +81,8 @@ export const createProject = form(CreateProjectSchema, async (data) => {
 			await tx.insert(secretVersions).values(secretVersionRecords);
 		}
 	});
+	await getProjectNames({ limit: 5 }).refresh();
 	await getProjectNames().refresh();
-
 	redirect(303, `/dashboard/projects/${projectId}`);
 });
 
@@ -228,8 +228,8 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 		}
 	});
 
+	await getProjectNames({ limit: 5 }).refresh();
 	await getProjectNames().refresh();
-
 	redirect(303, `/dashboard/projects/${projectId}`);
 });
 
@@ -251,6 +251,7 @@ export const deleteProject = command(DeleteProjectSchema, async ({ id }) => {
 	if (project.userId !== session.user.id) error(403, 'Forbidden');
 	await db.delete(projects).where(eq(projects.id, id));
 	await getProjectNames({ limit: 5 }).refresh();
+	await getProjectNames().refresh();
 });
 
 export type RemoteUpdateProjectType = typeof updateProject;
