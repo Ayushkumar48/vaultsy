@@ -99,7 +99,6 @@
 			{/each}
 		</div>
 	{:else if (projects.current?.length ?? 0) === 0}
-		<!-- No projects at all -->
 		<div
 			class="flex flex-col items-center justify-center gap-4 rounded-xl border border-dashed py-20 text-center"
 		>
@@ -118,7 +117,6 @@
 			</Button>
 		</div>
 	{:else if filtered.length === 0}
-		<!-- Has projects, but search matched nothing -->
 		<div
 			class="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed py-16 text-center"
 		>

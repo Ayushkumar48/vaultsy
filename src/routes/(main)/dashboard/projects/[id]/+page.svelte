@@ -65,7 +65,20 @@
 		const env = project.environments.find((e) => e.name === envName);
 		if (!env) return '';
 
-		return env.secrets.map((s) => `${s.key}=${s.value}`).join('\n');
+		const lines = env.secrets.map((s) => {
+			const val = s.value;
+			// Values that contain spaces, #, $, quotes, or backslashes must be quoted.
+			const needsQuoting = /[\s#$"'\\`]/.test(val) || val === '';
+			if (needsQuoting) {
+				// Double-quote the value and escape any inner double-quotes and backslashes.
+				const escaped = val.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+				return `${s.key}="${escaped}"`;
+			}
+			return `${s.key}=${val}`;
+		});
+
+		// Always end with a trailing newline — POSIX text file convention.
+		return lines.join('\n') + '\n';
 	}
 
 	function exportAsJson(envName: string) {
@@ -91,14 +104,18 @@
 		return JSON.stringify(obj, null, 2);
 	}
 
-	function downloadFile(content: string, filename: string) {
-		const blob = new Blob([content], { type: 'text/plain' });
+	function downloadFile(content: string, filename: string, mimeType = 'text/plain') {
+		const blob = new Blob([content], { type: mimeType });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement('a');
 		a.href = url;
 		a.download = filename;
+		// Must be in the DOM for Firefox to trigger the download reliably.
+		document.body.appendChild(a);
 		a.click();
-		URL.revokeObjectURL(url);
+		document.body.removeChild(a);
+		// Revoke after a tick so the browser has time to start the download.
+		setTimeout(() => URL.revokeObjectURL(url), 100);
 	}
 </script>
 
@@ -209,7 +226,8 @@
 											const content = exportAsJson(envName);
 											downloadFile(
 												content,
-												`${project.title.toLowerCase().replace(/\s+/g, '-')}-${envName}.json`
+												`${project.title.toLowerCase().replace(/\s+/g, '-')}-${envName}.json`,
+												'application/json'
 											);
 										}}
 									>
@@ -223,7 +241,8 @@
 											const content = exportAsDotNetJson(envName);
 											downloadFile(
 												content,
-												`${project.title.toLowerCase().replace(/\s+/g, '-')}-${envName}.appsettings.json`
+												`${project.title.toLowerCase().replace(/\s+/g, '-')}-${envName}.appsettings.json`,
+												'application/json'
 											);
 										}}
 									>
