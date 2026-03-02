@@ -2,6 +2,7 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import FolderIcon from '@lucide/svelte/icons/folder';
+	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
 	import ForwardIcon from '@lucide/svelte/icons/forward';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import PlusIcon from '@lucide/svelte/icons/plus';
@@ -127,6 +128,15 @@
 						</li>
 					{/each}
 				</ol>
+				<Sidebar.MenuItem>
+					<Sidebar.MenuButton
+						tooltipContent="Show More"
+						onclick={() => goto(resolve('/dashboard/projects'))}
+					>
+						<FolderOpenIcon />
+						Show More
+					</Sidebar.MenuButton>
+				</Sidebar.MenuItem>
 			{:else}
 				<Sidebar.MenuItem>
 					<p class="px-4 py-2 text-sm text-muted-foreground group-data-[collapsible=icon]:hidden">

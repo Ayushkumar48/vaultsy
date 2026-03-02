@@ -29,3 +29,29 @@ export function formatDate(
 		day: 'numeric'
 	});
 }
+
+type Unit = 'year' | 'month' | 'week' | 'day' | 'hour' | 'minute' | 'second';
+
+export function timeAgo(input: Date | string) {
+	const date = typeof input === 'string' ? new Date(input) : input;
+	if (isNaN(date.getTime())) return '';
+	const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+	const diff = Math.floor((Date.now() - date.getTime()) / 1000);
+	const intervals: Record<Unit, number> = {
+		year: 31536000,
+		month: 2592000,
+		week: 604800,
+		day: 86400,
+		hour: 3600,
+		minute: 60,
+		second: 1
+	};
+	for (const unit of Object.keys(intervals) as Unit[]) {
+		const seconds = intervals[unit];
+		const value = Math.floor(diff / seconds);
+		if (Math.abs(value) >= 1) {
+			return rtf.format(-value, unit);
+		}
+	}
+	return 'just now';
+}

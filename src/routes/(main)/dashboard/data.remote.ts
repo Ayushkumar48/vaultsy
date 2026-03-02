@@ -7,9 +7,11 @@ export const getProjectNames = query(async () => {
 	return await db
 		.select({
 			id: projects.id,
-			title: projects.title
+			title: projects.title,
+			updatedAt: projects.updatedAt
 		})
 		.from(projects)
 		.where(isNull(projects.deletedAt))
-		.orderBy(desc(projects.updatedAt));
+		.orderBy(desc(projects.updatedAt))
+		.limit(5);
 });

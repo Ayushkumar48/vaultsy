@@ -17,7 +17,7 @@
 			</div>
 		</header>
 		<Separator />
-		<div class="p-4 pt-0">
+		<div class="p-4">
 			{@render children()}
 		</div>
 	</Sidebar.Inset>

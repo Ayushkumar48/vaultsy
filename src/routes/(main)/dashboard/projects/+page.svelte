@@ -3,33 +3,31 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import { deleteProject } from './new/project.remote';
+	import { getProjectNames } from '../data.remote';
+	import { timeAgo } from '$lib/utils';
 
-	interface Project {
-		id: string;
-		title: string;
-		createdAt: Date;
-		updatedAt: Date;
-		_count?: {
-			environments: number;
-		};
-	}
-
-	let projects: Project[] = $state([]);
 	let searchQuery = $state('');
-	let isLoading = $state(true);
+	let isLoading = $state(false);
+	let deleteProjectId: string | null = $state(null);
+	let deleteProjectTitle: string | null = $state(null);
 
-	let filteredProjects = $derived(
-		projects.filter((p) => p.title.toLowerCase().includes(searchQuery.toLowerCase()))
-	);
+	async function handleDeleteProject() {
+		if (!deleteProjectId) return;
 
-	function navigateToProject(id: string) {
-		goto(resolve(`/dashboard/projects/${id}`));
-	}
-
-	function navigateToNewProject() {
-		goto(resolve('/dashboard/projects/new'));
+		isLoading = true;
+		try {
+			await deleteProject({ id: deleteProjectId });
+		} catch (error) {
+			console.error('Failed to delete project:', error);
+		} finally {
+			isLoading = false;
+			deleteProjectId = null;
+			deleteProjectTitle = null;
+		}
 	}
 </script>
 
@@ -39,114 +37,103 @@
 			<h1 class="text-3xl font-bold tracking-tight">Projects</h1>
 			<p class="text-muted-foreground">Manage your environment variables across projects</p>
 		</div>
-		<Button onclick={navigateToNewProject}>New Project</Button>
+		<Button onclick={() => goto(resolve('/dashboard/projects/new'))}>New Project</Button>
 	</div>
 
 	<div class="flex items-center gap-2">
 		<Input placeholder="Search projects..." bind:value={searchQuery} class="max-w-sm" />
 	</div>
 
-	{#if isLoading}
+	{#await getProjectNames()}
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{#each Array(3) as _, index (index)}
-				<Card.Root>
-					<Card.Header>
-						<Card.Title>
-							<div class="h-6 w-32 animate-pulse rounded bg-muted"></div>
-						</Card.Title>
-						<Card.Description>
-							<div class="h-4 w-24 animate-pulse rounded bg-muted"></div>
-						</Card.Description>
-					</Card.Header>
-					<Card.Content>
-						<div class="h-4 w-20 animate-pulse rounded bg-muted"></div>
-					</Card.Content>
-				</Card.Root>
+				<Card.Root class="h-32 animate-pulse" />
 			{/each}
 		</div>
-	{:else if filteredProjects.length === 0}
-		<div class="flex flex-col items-center justify-center py-12 text-center">
-			<div class="mb-4 rounded-full bg-muted p-4">
-				<svg
-					xmlns="http://www.w3.org/2000/svg"
-					class="h-8 w-8 text-muted-foreground"
-					fill="none"
-					viewBox="0 0 24 24"
-					stroke="currentColor"
-				>
-					<path
-						stroke-linecap="round"
-						stroke-linejoin="round"
-						stroke-width="2"
-						d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
-					/>
-				</svg>
-			</div>
-			<h3 class="mb-1 text-lg font-semibold">No projects found</h3>
-			<p class="mb-4 text-sm text-muted-foreground">
-				{searchQuery ? 'Try a different search term' : 'Get started by creating a new project'}
-			</p>
-			{#if !searchQuery}
-				<Button onclick={navigateToNewProject}>Create Project</Button>
-			{/if}
-		</div>
-	{:else}
-		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-			{#each filteredProjects as project (project.id)}
-				<Card.Root
-					class="cursor-pointer transition-all hover:shadow-md"
-					onclick={() => navigateToProject(project.id)}
-				>
-					<Card.Header class="flex flex-row items-center justify-between pb-2">
-						<Card.Title class="text-lg">{project.title}</Card.Title>
-						<DropdownMenu.Root>
-							<DropdownMenu.Trigger onclick={(e) => e.stopPropagation()}>
-								<Button variant="ghost" size="icon" class="h-8 w-8">
-									<svg
-										xmlns="http://www.w3.org/2000/svg"
-										class="h-4 w-4"
-										fill="none"
-										viewBox="0 0 24 24"
-										stroke="currentColor"
+	{:then projects}
+		{#if projects.length === 0}
+			<div class="py-12 text-center text-muted-foreground">No projects found</div>
+		{:else}
+			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				{#each projects as project (project.id)}
+					<Card.Root
+						class="cursor-pointer transition-all hover:shadow-md"
+						onclick={() => goto(resolve(`/dashboard/projects/${project.id}`))}
+					>
+						<Card.Header class="flex flex-row items-center justify-between pb-2">
+							<Card.Title class="text-lg">
+								{project.title}
+							</Card.Title>
+
+							<DropdownMenu.Root>
+								<DropdownMenu.Trigger onclick={(e) => e.stopPropagation()}>
+									<Button variant="ghost" size="icon">⋮</Button>
+								</DropdownMenu.Trigger>
+
+								<DropdownMenu.Content align="end">
+									<DropdownMenu.Item
+										onclick={(e) => {
+											e.stopPropagation();
+											goto(resolve(`/dashboard/projects/${project.id}`));
+										}}
 									>
-										<path
-											stroke-linecap="round"
-											stroke-linejoin="round"
-											stroke-width="2"
-											d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z"
-										/>
-									</svg>
-								</Button>
-							</DropdownMenu.Trigger>
-							<DropdownMenu.Content align="end">
-								<DropdownMenu.Item
-									onclick={(e) => {
-										e.stopPropagation();
-										navigateToProject(project.id);
-									}}
-								>
-									View Details
-								</DropdownMenu.Item>
-								<DropdownMenu.Item onclick={(e) => e.stopPropagation()}>Rename</DropdownMenu.Item>
-								<DropdownMenu.Separator />
-								<DropdownMenu.Item onclick={(e) => e.stopPropagation()} class="text-red-600">
-									Delete
-								</DropdownMenu.Item>
-							</DropdownMenu.Content>
-						</DropdownMenu.Root>
-					</Card.Header>
-					<Card.Content>
-						<p class="text-sm text-muted-foreground">
-							{project._count?.environments ?? 0} environment{project._count?.environments !== 1
-								? 's'
-								: ''}
-						</p>
-						<p class="mt-2 text-xs text-muted-foreground">
-							Updated {new Date(project.updatedAt).toLocaleDateString()}
-						</p>
-					</Card.Content>
-				</Card.Root>
-			{/each}
-		</div>
-	{/if}
+										View Details
+									</DropdownMenu.Item>
+
+									<DropdownMenu.Separator />
+
+									<DropdownMenu.Item
+										class="text-red-600"
+										onclick={(e) => {
+											e.stopPropagation();
+											deleteProjectId = project.id;
+											deleteProjectTitle = project.title;
+										}}
+									>
+										Delete
+									</DropdownMenu.Item>
+								</DropdownMenu.Content>
+							</DropdownMenu.Root>
+						</Card.Header>
+
+						<Card.Content>
+							<p class="text-xs text-muted-foreground">
+								Updated {timeAgo(project.updatedAt)}
+							</p>
+						</Card.Content>
+					</Card.Root>
+				{/each}
+			</div>
+		{/if}
+	{:catch}
+		<div class="py-12 text-center text-red-500">Failed to load projects</div>
+	{/await}
 </div>
+
+<AlertDialog.Root
+	open={deleteProjectId !== null}
+	onOpenChange={(open) => {
+		if (!open) {
+			deleteProjectId = null;
+			deleteProjectTitle = null;
+		}
+	}}
+>
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>Confirm Deletion</AlertDialog.Title>
+			<AlertDialog.Description>
+				Are you sure you want to delete the project "{deleteProjectTitle}"? This action cannot be
+				undone.
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel disabled={isLoading}>Cancel</AlertDialog.Cancel>
+
+			<AlertDialog.Action onclick={handleDeleteProject} disabled={isLoading}>
+				{isLoading ? 'Deleting...' : 'Confirm'}
+			</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
