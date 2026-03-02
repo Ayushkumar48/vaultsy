@@ -52,82 +52,75 @@
 			</Sidebar.MenuItem>
 		{:then projects}
 			{#if projects.length > 0}
-				<ol class="list-decimal pl-4">
-					{#each projects as item (item.title)}
-						<li>
-							<DropdownMenu.Root>
-								<DropdownMenu.Trigger>
-									{#snippet child({ props })}
-										<Sidebar.MenuButton {...props} tooltipContent={item.title}>
-											<span>{item.title}</span>
-											<EllipsisIcon class="ms-auto transition-transform duration-200" />
-										</Sidebar.MenuButton>
-									{/snippet}
-								</DropdownMenu.Trigger>
-								<DropdownMenu.Content align="start" side="right" class="w-56">
-									<DropdownMenu.Item
-										onclick={() => goto(resolve(`/dashboard/projects/${item.id}`))}
-									>
-										<FolderIcon class="text-muted-foreground" />
-										<span>View Project</span>
-									</DropdownMenu.Item>
-									<DropdownMenu.Item
-										onclick={() => goto(resolve(`/dashboard/projects/${item.id}/share`))}
-									>
-										<ForwardIcon class="text-muted-foreground" />
-										<span>Share Project</span>
-									</DropdownMenu.Item>
-									<DropdownMenu.Item
-										onSelect={(e) => {
-											e.preventDefault();
-											deleteProjectId = item.id;
-										}}
-									>
-										<Trash2Icon class="text-muted-foreground" />
-										<span>Delete Project</span>
-									</DropdownMenu.Item>
+				{#each projects as item, index (item.id)}
+					<DropdownMenu.Root>
+						<DropdownMenu.Trigger>
+							{#snippet child({ props })}
+								<Sidebar.MenuButton {...props} tooltipContent={item.title}>
+									<span>{index + 1}. {item.title}</span>
+									<EllipsisIcon class="ms-auto transition-transform duration-200" />
+								</Sidebar.MenuButton>
+							{/snippet}
+						</DropdownMenu.Trigger>
+						<DropdownMenu.Content align="start" side="right" class="w-56">
+							<DropdownMenu.Item onclick={() => goto(resolve(`/dashboard/projects/${item.id}`))}>
+								<FolderIcon class="text-muted-foreground" />
+								<span>View Project</span>
+							</DropdownMenu.Item>
+							<DropdownMenu.Item
+								onclick={() => goto(resolve(`/dashboard/projects/${item.id}/share`))}
+							>
+								<ForwardIcon class="text-muted-foreground" />
+								<span>Share Project</span>
+							</DropdownMenu.Item>
+							<DropdownMenu.Item
+								onSelect={(e) => {
+									e.preventDefault();
+									deleteProjectId = item.id;
+								}}
+							>
+								<Trash2Icon class="text-muted-foreground" />
+								<span>Delete Project</span>
+							</DropdownMenu.Item>
 
-									<AlertDialog.Root
-										open={deleteProjectId !== null}
-										onOpenChange={(open) => {
-											if (!open) deleteProjectId = null;
-										}}
-									>
-										<AlertDialog.Content>
-											<AlertDialog.Header>
-												<AlertDialog.Title>Confirm Deletion</AlertDialog.Title>
-												<AlertDialog.Description>
-													Are you sure you want to delete this project? This action cannot be
-													undone.
-												</AlertDialog.Description>
-											</AlertDialog.Header>
+							<AlertDialog.Root
+								open={deleteProjectId !== null}
+								onOpenChange={(open) => {
+									if (!open) deleteProjectId = null;
+								}}
+							>
+								<AlertDialog.Content>
+									<AlertDialog.Header>
+										<AlertDialog.Title>Confirm Deletion</AlertDialog.Title>
+										<AlertDialog.Description>
+											Are you sure you want to delete this project? This action cannot be undone.
+										</AlertDialog.Description>
+									</AlertDialog.Header>
 
-											<AlertDialog.Footer>
-												<AlertDialog.Cancel disabled={isLoading}>Cancel</AlertDialog.Cancel>
+									<AlertDialog.Footer>
+										<AlertDialog.Cancel disabled={isLoading}>Cancel</AlertDialog.Cancel>
 
-												<AlertDialog.Action
-													onclick={async () => {
-														if (!deleteProjectId) return;
-														await handleDeleteProject(deleteProjectId);
-														deleteProjectId = null;
-													}}
-													disabled={isLoading}
-												>
-													{#if isLoading}
-														Deleting...
-														<Spinner />
-													{:else}
-														Confirm
-													{/if}
-												</AlertDialog.Action>
-											</AlertDialog.Footer>
-										</AlertDialog.Content>
-									</AlertDialog.Root>
-								</DropdownMenu.Content>
-							</DropdownMenu.Root>
-						</li>
-					{/each}
-				</ol>
+										<AlertDialog.Action
+											onclick={async () => {
+												if (!deleteProjectId) return;
+												await handleDeleteProject(deleteProjectId);
+												deleteProjectId = null;
+											}}
+											disabled={isLoading}
+										>
+											{#if isLoading}
+												Deleting...
+												<Spinner />
+											{:else}
+												Confirm
+											{/if}
+										</AlertDialog.Action>
+									</AlertDialog.Footer>
+								</AlertDialog.Content>
+							</AlertDialog.Root>
+						</DropdownMenu.Content>
+					</DropdownMenu.Root>
+				{/each}
 				<Sidebar.MenuItem>
 					<Sidebar.MenuButton
 						tooltipContent="Show More"

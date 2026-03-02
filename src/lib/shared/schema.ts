@@ -20,3 +20,5 @@ export const UpdateProjectSchema = CreateProjectSchema.extend({
 export const DeleteProjectSchema = z.object({
 	id: z.string().min(1)
 });
+
+export const GetProjectSchemaFilters = z.object({}).optional();

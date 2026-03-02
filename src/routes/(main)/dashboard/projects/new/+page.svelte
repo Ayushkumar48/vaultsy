@@ -20,7 +20,7 @@
 	const isPending = $derived(!!createProject.pending);
 </script>
 
-<div class="min-h-screen px-4 py-10">
+<div class="px-4 py-10">
 	<form class="mx-auto max-w-4xl space-y-8" {...createProject}>
 		<div class="space-y-2">
 			<h1 class="text-3xl font-bold">Create New Project</h1>

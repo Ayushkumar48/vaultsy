@@ -85,7 +85,7 @@
 	}
 </script>
 
-<div class="min-h-screen px-4 py-8">
+<div class="x-4 py-8">
 	<div class="mx-auto max-w-6xl space-y-6">
 		<Button variant="ghost" size="sm" onclick={goBack} class="-ml-2 gap-1">
 			<ArrowLeft class="h-4 w-4" />

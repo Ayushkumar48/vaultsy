@@ -1,9 +1,10 @@
 import { query } from '$app/server';
 import { db } from '$lib/server/db';
 import { projects } from '$lib/server/db/schema';
+import { GetProjectSchemaFilters } from '$lib/shared/schema';
 import { isNull, desc } from 'drizzle-orm';
 
-export const getProjectNames = query(async () => {
+export const getProjectNames = query(GetProjectSchemaFilters, async () => {
 	return await db
 		.select({
 			id: projects.id,
