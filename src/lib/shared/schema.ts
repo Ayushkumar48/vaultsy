@@ -6,7 +6,7 @@ const SecretRowSchema = z.object({
 });
 
 export const CreateProjectSchema = z.object({
-	title: z.string().min(1),
+	title: z.string().min(1, { error: 'Title is required' }),
 	development: z.array(SecretRowSchema).optional().default([]),
 	staging: z.array(SecretRowSchema).optional().default([]),
 	preview: z.array(SecretRowSchema).optional().default([]),

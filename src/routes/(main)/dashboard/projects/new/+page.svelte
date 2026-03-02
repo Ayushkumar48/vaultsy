@@ -9,6 +9,7 @@
 	import { createProject } from './project.remote';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
+	import { CreateProjectSchema } from '$lib/shared/schema';
 
 	const fields = createProject.fields;
 
@@ -20,8 +21,8 @@
 	const isPending = $derived(!!createProject.pending);
 </script>
 
-<div class="px-4 py-10">
-	<form class="mx-auto max-w-4xl space-y-8" {...createProject}>
+<div>
+	<form class="mx-auto w-full space-y-8" {...createProject.preflight(CreateProjectSchema)}>
 		<div class="space-y-2">
 			<h1 class="text-3xl font-bold">Create New Project</h1>
 			<p class="text-muted-foreground">
@@ -36,6 +37,9 @@
 				<div class="space-y-2">
 					<Label>Project Name</Label>
 					<Input placeholder="My Backend API" {...fields.title.as('text')} />
+					{#each fields.title.issues() as issue (issue.message)}
+						<p class="text-sm text-destructive">{issue.message}</p>
+					{/each}
 				</div>
 				<Separator />
 				<EnvEditor

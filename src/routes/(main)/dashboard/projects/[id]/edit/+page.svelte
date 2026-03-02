@@ -2,17 +2,22 @@
 	import { Card, CardHeader, CardTitle, CardContent } from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import { Button } from '$lib/components/ui/button';
+	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
 	import { isValidKey } from '$lib/features/vaultsy';
 	import EnvEditor from '$lib/components/custom/env-editor.svelte';
 	import { Spinner } from '$lib/components/ui/spinner';
 	import Save from '@lucide/svelte/icons/save';
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
-	import { goto } from '$app/navigation';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import { goto, invalidate } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import { onMount } from 'svelte';
-	import { updateProject } from '../../new/project.remote.js';
+	import { updateProject, deleteProject } from '../../new/project.remote.js';
+	import { toast } from 'svelte-sonner';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+	import { cn } from '$lib/utils.js';
+	import { UpdateProjectSchema } from '$lib/shared/schema.js';
 
 	let { data } = $props();
 	const project = $derived(data.project);
@@ -51,10 +56,39 @@
 	function goBack() {
 		goto(resolve(`/dashboard/projects/${project.id}`));
 	}
+
+	let isDeleting = $state(false);
+
+	async function handleDelete() {
+		isDeleting = true;
+		try {
+			await deleteProject({ id: project.id });
+			toast.success('Project deleted successfully!');
+			goto(resolve('/dashboard/projects'));
+		} catch (e) {
+			console.error(e);
+			toast.error('Failed to delete project. Please try again.');
+		} finally {
+			isDeleting = false;
+		}
+	}
 </script>
 
-<div class="px-4 py-10">
-	<form class="mx-auto max-w-4xl space-y-8" {...updateProject}>
+<div>
+	<form
+		class="mx-auto w-full space-y-8"
+		{...updateProject.preflight(UpdateProjectSchema).enhance(async ({ data, submit }) => {
+			try {
+				await submit();
+				await invalidate(`app:project:${data.id}`);
+				goto(resolve(`/dashboard/projects/${data.id}`));
+				toast.success('Project updated successfully!');
+			} catch (e) {
+				console.error(e);
+				toast.error('Failed to update project. Please try again.');
+			}
+		})}
+	>
 		<input type="hidden" {...fields.id.as('text')} />
 		<div class="flex items-center gap-4">
 			<Button variant="ghost" size="icon" onclick={goBack}>
@@ -75,6 +109,9 @@
 				<div class="space-y-2">
 					<Label>Project Name</Label>
 					<Input placeholder="My Backend API" {...fields.title.as('text')} />
+					{#each fields.title.issues() as issue (issue.message)}
+						<p class="text-sm text-destructive">{issue.message}</p>
+					{/each}
 				</div>
 				<Separator />
 				<EnvEditor
@@ -85,17 +122,55 @@
 				/>
 			</CardContent>
 		</Card>
-		<div class="flex justify-end gap-2">
-			<Button size="lg" variant="outline" onclick={goBack}>Cancel</Button>
-			<Button size="lg" type="submit" disabled={hasInvalidKeys || isPending}>
-				{#if isPending}
-					<Spinner />
-					Saving...
-				{:else}
-					<Save />
-					Save Changes
-				{/if}
-			</Button>
+		<div class="flex justify-between">
+			<AlertDialog.Root>
+				<AlertDialog.Trigger
+					class={cn(buttonVariants({ variant: 'destructive', size: 'lg' }))}
+					type="button"
+				>
+					<Trash2Icon />
+					Delete Project
+				</AlertDialog.Trigger>
+				<AlertDialog.Portal>
+					<AlertDialog.Overlay />
+					<AlertDialog.Content>
+						<AlertDialog.Header>
+							<AlertDialog.Title>Delete Project</AlertDialog.Title>
+							<AlertDialog.Description>
+								Are you sure you want to delete <b>"{project.title}"</b>? This action cannot be
+								undone.
+							</AlertDialog.Description>
+						</AlertDialog.Header>
+						<AlertDialog.Footer>
+							<AlertDialog.Cancel disabled={isDeleting} type="button">Cancel</AlertDialog.Cancel>
+							<AlertDialog.Action
+								class={cn(buttonVariants({ variant: 'destructive' }))}
+								onclick={handleDelete}
+								type="button"
+								disabled={isDeleting}
+							>
+								{#if isDeleting}
+									<Spinner /> Deleting...
+								{:else}
+									Delete
+								{/if}
+							</AlertDialog.Action>
+						</AlertDialog.Footer>
+					</AlertDialog.Content>
+				</AlertDialog.Portal>
+			</AlertDialog.Root>
+			<div class="flex gap-2">
+				<Button size="lg" variant="outline" onclick={goBack} type="button">Cancel</Button>
+				<Button size="lg" type="submit" disabled={hasInvalidKeys || isPending}>
+					{#if isPending}
+						<Spinner />
+						Saving...
+					{:else}
+						<Save />
+						Save Changes
+					{/if}
+				</Button>
+			</div>
 		</div>
 	</form>
 </div>

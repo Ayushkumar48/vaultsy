@@ -1,0 +1,1 @@
+ALTER TABLE "projects" ADD COLUMN "encrypted_dek" text DEFAULT '' NOT NULL;

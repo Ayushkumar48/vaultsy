@@ -1,12 +1,14 @@
 <script lang="ts">
 	import { Input } from '$lib/components/ui/input';
 	import { Button } from '$lib/components/ui/button';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { EnvironmentType, type Environment } from '$lib/shared/enums';
 	import { getKeyError, handleEnvPaste, ensureOneEmptyRow } from '$lib/features/vaultsy';
 	import { cn } from '$lib/utils';
 	import type { RemoteCreateProjectType } from '../../../routes/(main)/dashboard/projects/new/project.remote';
 	import { onMount } from 'svelte';
+	import { toast } from 'svelte-sonner';
 
 	type Fields = RemoteCreateProjectType['fields'];
 	let {
@@ -108,14 +110,27 @@
 						</div>
 						<Button
 							type="button"
-							variant="destructive"
-							size="sm"
+							variant="outline"
+							size="icon"
+							class="text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
 							onclick={() => {
 								const updated = getRows(env).filter((_, i) => i !== index);
-								field.set(ensureOneEmptyRow(updated));
+								const ensured = ensureOneEmptyRow(updated);
+
+								if (
+									ensured.length === 1 &&
+									!ensured[0].key &&
+									!ensured[0].value &&
+									updated.length === 0
+								) {
+									toast.warning("You can't delete the last empty row.");
+									return;
+								}
+
+								field.set(ensured);
 							}}
 						>
-							X
+							<Trash2Icon class="h-4 w-4" />
 						</Button>
 					</div>
 				{/each}

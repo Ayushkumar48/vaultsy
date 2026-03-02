@@ -16,6 +16,7 @@
 
 	let { data } = $props();
 	const project = $derived(data.project);
+	const projectId = $derived(data.projectId);
 	let visibleSecrets: Record<string, boolean> = $state({});
 	let copiedKey: string | null = $state(null);
 
@@ -79,15 +80,16 @@
 		a.click();
 		URL.revokeObjectURL(url);
 	}
-
-	function goBack() {
-		goto(resolve('/dashboard/projects'));
-	}
 </script>
 
-<div class="x-4 py-8">
-	<div class="mx-auto max-w-6xl space-y-6">
-		<Button variant="ghost" size="sm" onclick={goBack} class="-ml-2 gap-1">
+<div>
+	<div class="mx-auto w-full space-y-6">
+		<Button
+			variant="ghost"
+			size="sm"
+			onclick={() => goto(resolve('/dashboard/projects'))}
+			class="-ml-2 gap-1"
+		>
 			<ArrowLeft class="h-4 w-4" />
 			Back to Projects
 		</Button>
@@ -206,7 +208,8 @@
 									<p class="mb-4 text-sm text-muted-foreground">
 										Add your first secret to this environment
 									</p>
-									<Button>Add Secret</Button>
+									<Button href={resolve(`/dashboard/projects/${projectId}/edit`)}>Add Secret</Button
+									>
 								</div>
 							{:else}
 								<div class="space-y-2">

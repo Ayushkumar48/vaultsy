@@ -8,6 +8,7 @@ import { generateId } from '$lib/server/utils';
 import { EnvironmentType } from '$lib/shared/enums';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getProjectNames } from '../../data.remote';
+import { generateDek, encryptSecret, decryptDek, decryptSecret } from '$lib/server/crypto';
 
 export const createProject = form(CreateProjectSchema, async (data) => {
 	const { title } = data;
@@ -25,6 +26,8 @@ export const createProject = form(CreateProjectSchema, async (data) => {
 	}
 
 	const projectId = generateId();
+
+	const { dek, encryptedDek } = await generateDek();
 
 	const envRecords: (typeof environments.$inferInsert)[] = [];
 	const secretRecords: (typeof secrets.$inferInsert)[] = [];
@@ -54,7 +57,7 @@ export const createProject = form(CreateProjectSchema, async (data) => {
 					secretVersionRecords.push({
 						id: generateId(),
 						secretId,
-						encryptedValue: row.value,
+						encryptedValue: await encryptSecret(dek, row.value),
 						version: 1
 					});
 				}
@@ -66,7 +69,8 @@ export const createProject = form(CreateProjectSchema, async (data) => {
 		await tx.insert(projects).values({
 			id: projectId,
 			title: title.trim(),
-			userId: session.user.id
+			userId: session.user.id,
+			encryptedDek
 		});
 
 		if (envRecords.length > 0) {
@@ -104,6 +108,9 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 		});
 
 		if (!existingProject) error(404, 'Project not found');
+
+		// Unwrap the project DEK so we can encrypt new/updated secret values
+		const dek = await decryptDek(existingProject.encryptedDek);
 
 		await tx
 			.update(projects)
@@ -172,15 +179,22 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 				if (existingSecret) {
 					const latestVersion = latestVersionMap.get(existingSecret.id);
 
-					if (latestVersion && latestVersion.encryptedValue !== row.value) {
-						newVersionRecords.push({
-							id: generateId(),
-							secretId: existingSecret.id,
-							encryptedValue: row.value,
-							version: latestVersion.version + 1
-						});
+					if (latestVersion) {
+						// Decrypt the stored value to compare plaintexts — we cannot
+						// compare ciphertexts directly because each encryption uses a
+						// random IV, making every output unique even for identical inputs.
+						const storedPlaintext = await decryptSecret(dek, latestVersion.encryptedValue);
 
-						secretsToTouch.push(existingSecret.id);
+						if (storedPlaintext !== row.value) {
+							newVersionRecords.push({
+								id: generateId(),
+								secretId: existingSecret.id,
+								encryptedValue: await encryptSecret(dek, row.value),
+								version: latestVersion.version + 1
+							});
+
+							secretsToTouch.push(existingSecret.id);
+						}
 					}
 				} else {
 					const secretId = generateId();
@@ -194,7 +208,7 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 					newVersionRecords.push({
 						id: generateId(),
 						secretId,
-						encryptedValue: row.value,
+						encryptedValue: await encryptSecret(dek, row.value),
 						version: 1
 					});
 				}
@@ -230,7 +244,6 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 
 	await getProjectNames({ limit: 5 }).refresh();
 	await getProjectNames().refresh();
-	redirect(303, `/dashboard/projects/${projectId}`);
 });
 
 export const deleteProject = command(DeleteProjectSchema, async ({ id }) => {

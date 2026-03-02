@@ -10,6 +10,7 @@ export const projects = pgTable(
 	{
 		id: text('id').primaryKey(),
 		title: text('title').notNull(),
+		encryptedDek: text('encrypted_dek').notNull().default(''),
 		createdAt: timestamp('created_at').notNull().defaultNow(),
 		userId: text('user_id')
 			.references(() => user.id, { onDelete: 'cascade' })
