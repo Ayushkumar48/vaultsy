@@ -15,7 +15,7 @@ To recreate this project with the same configuration:
 
 ```sh
 # recreate this project
-bun x sv create --template minimal --types ts --add prettier eslint tailwindcss="plugins:none" sveltekit-adapter="adapter:vercel" devtools-json drizzle="database:postgresql+postgresql:neon" better-auth="demo:github" mcp="ide:claude-code,gemini+setup:remote" --install bun env-manager
+bun x sv create --template minimal --types ts --add prettier eslint tailwindcss="plugins:none" sveltekit-adapter="adapter:vercel" devtools-json drizzle="database:postgresql+postgresql:neon" better-auth="demo:github" mcp="ide:claude-code,gemini+setup:remote" --install bun vaultsy
 ```
 
 ## Developing

@@ -17,7 +17,7 @@
 			>
 				<AudioWaveformIcon class="size-4" />
 			</div>
-			<span class="truncate font-medium"> ENV Manager </span>
+			<span class="truncate font-medium"> Vaultsy </span>
 		</Sidebar.MenuButton>
 	</Sidebar.MenuItem>
 </Sidebar.Menu>

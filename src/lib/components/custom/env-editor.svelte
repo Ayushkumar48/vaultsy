@@ -3,7 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { EnvironmentType, type Environment } from '$lib/shared/enums';
-	import { getKeyError, handleEnvPaste, ensureOneEmptyRow } from '$lib/features/env-manager';
+	import { getKeyError, handleEnvPaste, ensureOneEmptyRow } from '$lib/features/vaultsy';
 	import { cn } from '$lib/utils';
 	import type { RemoteCreateProjectType } from '../../../routes/(main)/dashboard/projects/new/project.remote';
 	import { onMount } from 'svelte';

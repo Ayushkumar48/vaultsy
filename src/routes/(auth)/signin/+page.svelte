@@ -17,7 +17,7 @@
 			>
 				<GalleryVerticalEndIcon class="size-4" />
 			</div>
-			ENV Manager
+			Vaultsy
 		</a>
 		<Card.Root>
 			<Card.Header class="text-center">

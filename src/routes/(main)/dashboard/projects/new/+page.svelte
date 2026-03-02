@@ -4,7 +4,7 @@
 	import { Label } from '$lib/components/ui/label';
 	import { Button } from '$lib/components/ui/button';
 	import { Separator } from '$lib/components/ui/separator';
-	import { isValidKey } from '$lib/features/env-manager';
+	import { isValidKey } from '$lib/features/vaultsy';
 	import EnvEditor from '$lib/components/custom/env-editor.svelte';
 	import { createProject } from './project.remote';
 	import { Spinner } from '$lib/components/ui/spinner';
