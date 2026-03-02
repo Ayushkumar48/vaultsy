@@ -6,7 +6,7 @@ import { auth } from '$lib/server/auth';
 import { CreateProjectSchema, DeleteProjectSchema, UpdateProjectSchema } from '$lib/shared/schema';
 import { generateId } from '$lib/server/utils';
 import { EnvironmentType } from '$lib/shared/enums';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, max } from 'drizzle-orm';
 import { getProjectNames } from '../../data.remote';
 import { generateDek, encryptSecret, decryptDek, decryptSecret } from '$lib/server/crypto';
 
@@ -138,20 +138,18 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 
 		const secretIds = allSecrets.map((s) => s.id);
 
-		const allVersions = secretIds.length
-			? await tx.query.secretVersions.findMany({
-					where: inArray(secretVersions.secretId, secretIds)
-				})
+		const latestVersionRows = secretIds.length
+			? await tx
+					.select({
+						secretId: secretVersions.secretId,
+						version: max(secretVersions.version).as('version')
+					})
+					.from(secretVersions)
+					.where(inArray(secretVersions.secretId, secretIds))
+					.groupBy(secretVersions.secretId)
 			: [];
 
-		const latestVersionMap = new Map<string, (typeof allVersions)[number]>();
-
-		for (const v of allVersions) {
-			const existing = latestVersionMap.get(v.secretId);
-			if (!existing || v.version > existing.version) {
-				latestVersionMap.set(v.secretId, v);
-			}
-		}
+		const latestVersionMap = new Map(latestVersionRows.map((r) => [r.secretId, r.version ?? 0]));
 
 		const newSecretRecords: (typeof secrets.$inferInsert)[] = [];
 		const newVersionRecords: (typeof secretVersions.$inferInsert)[] = [];
@@ -177,23 +175,38 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 				const existingSecret = secretMap.get(compositeKey);
 
 				if (existingSecret) {
-					const latestVersion = latestVersionMap.get(existingSecret.id);
+					const currentVersion = latestVersionMap.get(existingSecret.id);
 
-					if (latestVersion) {
-						// Decrypt the stored value to compare plaintexts — we cannot
-						// compare ciphertexts directly because each encryption uses a
-						// random IV, making every output unique even for identical inputs.
-						const storedPlaintext = await decryptSecret(dek, latestVersion.encryptedValue);
+					if (currentVersion !== undefined) {
+						// Fetch only the latest version row so we can decrypt and compare
+						// plaintexts — ciphertexts cannot be compared directly because
+						// each AES-GCM encryption uses a unique random IV.
+						const [latestVersion] = await tx
+							.select({
+								encryptedValue: secretVersions.encryptedValue
+							})
+							.from(secretVersions)
+							.where(
+								and(
+									eq(secretVersions.secretId, existingSecret.id),
+									eq(secretVersions.version, currentVersion)
+								)
+							)
+							.limit(1);
 
-						if (storedPlaintext !== row.value) {
-							newVersionRecords.push({
-								id: generateId(),
-								secretId: existingSecret.id,
-								encryptedValue: await encryptSecret(dek, row.value),
-								version: latestVersion.version + 1
-							});
+						if (latestVersion) {
+							const storedPlaintext = await decryptSecret(dek, latestVersion.encryptedValue);
 
-							secretsToTouch.push(existingSecret.id);
+							if (storedPlaintext !== row.value) {
+								newVersionRecords.push({
+									id: generateId(),
+									secretId: existingSecret.id,
+									encryptedValue: await encryptSecret(dek, row.value),
+									version: currentVersion + 1
+								});
+
+								secretsToTouch.push(existingSecret.id);
+							}
 						}
 					}
 				} else {
