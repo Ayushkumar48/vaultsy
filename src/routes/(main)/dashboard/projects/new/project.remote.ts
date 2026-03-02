@@ -1,5 +1,5 @@
 import { error, redirect } from '@sveltejs/kit';
-import { form, getRequestEvent, query } from '$app/server';
+import { command, form, getRequestEvent } from '$app/server';
 import { db } from '$lib/server/db';
 import { projects, environments, secrets, secretVersions, user } from '$lib/server/db/schema';
 import { auth } from '$lib/server/auth';
@@ -7,6 +7,7 @@ import { CreateProjectSchema, DeleteProjectSchema, UpdateProjectSchema } from '$
 import { generateId } from '$lib/server/utils';
 import { EnvironmentType } from '$lib/shared/enums';
 import { and, eq, inArray } from 'drizzle-orm';
+import { getProjectNames } from '../../data.remote';
 
 export const createProject = form(CreateProjectSchema, async (data) => {
 	const { title } = data;
@@ -80,6 +81,7 @@ export const createProject = form(CreateProjectSchema, async (data) => {
 			await tx.insert(secretVersions).values(secretVersionRecords);
 		}
 	});
+	await getProjectNames().refresh();
 
 	redirect(303, `/dashboard/projects/${projectId}`);
 });
@@ -229,7 +231,7 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 	redirect(303, `/dashboard/projects/${projectId}`);
 });
 
-export const deleteProject = query(DeleteProjectSchema, async ({ id }) => {
+export const deleteProject = command(DeleteProjectSchema, async ({ id }) => {
 	const event = getRequestEvent();
 	if (!event) error(500, 'No request event');
 
@@ -246,6 +248,7 @@ export const deleteProject = query(DeleteProjectSchema, async ({ id }) => {
 		.innerJoin(user, eq(projects.userId, user.id));
 	if (project.userId !== session.user.id) error(403, 'Forbidden');
 	await db.delete(projects).where(eq(projects.id, id));
+	await getProjectNames().refresh();
 });
 
 export type RemoteUpdateProjectType = typeof updateProject;

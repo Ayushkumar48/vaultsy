@@ -13,12 +13,16 @@
 	import { goto } from '$app/navigation';
 	import { deleteProject } from '../../routes/(main)/dashboard/projects/new/project.remote';
 	import { toast } from 'svelte-sonner';
+	import { page } from '$app/state';
 	let isLoading = $state(false);
 	let deleteProjectId = $state<string | null>(null);
 	async function handleDeleteProject(id: string) {
 		isLoading = true;
 		try {
 			await deleteProject({ id });
+			if (page.url.pathname === `/dashboard/projects/${id}`) {
+				goto(resolve('/dashboard/projects'));
+			}
 		} catch (error) {
 			console.error(error);
 			toast.error('Failed to delete project');
