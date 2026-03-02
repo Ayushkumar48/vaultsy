@@ -42,3 +42,12 @@ export const GetProjectSchemaFilters = z
 		limit: z.number().int().positive().optional()
 	})
 	.optional();
+
+export const CreateTokenSchema = z.object({
+	name: z.string().min(1, 'Name is required').max(64, 'Name must be 64 characters or fewer'),
+	expiresIn: z.enum(['never', '30d', '90d', '1y']).optional().default('never')
+});
+
+export const RevokeTokenSchema = z.object({
+	id: z.string().min(1)
+});

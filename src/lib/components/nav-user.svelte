@@ -3,12 +3,15 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu/index.js';
 	import * as Sidebar from '$lib/components/ui/sidebar/index.js';
 	import { useSidebar } from '$lib/components/ui/sidebar/index.js';
-	import BadgeCheckIcon from '@lucide/svelte/icons/badge-check';
+
+	import KeyRoundIcon from '@lucide/svelte/icons/key-round';
 	import ChevronsUpDownIcon from '@lucide/svelte/icons/chevrons-up-down';
 	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import { signOut } from '../../routes/(auth)/signin/auth.remote';
 	import type { User } from '$lib/server/db/schema';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import { getInitials } from '$lib/utils';
 	import DarkMode from './custom/dark-mode.svelte';
 	let user: User = page.data.user;
@@ -56,9 +59,9 @@
 				</DropdownMenu.Label>
 				<DropdownMenu.Separator />
 				<DropdownMenu.Group>
-					<DropdownMenu.Item>
-						<BadgeCheckIcon />
-						Account
+					<DropdownMenu.Item onclick={() => goto(resolve('/dashboard/settings'))}>
+						<KeyRoundIcon />
+						API Tokens
 					</DropdownMenu.Item>
 				</DropdownMenu.Group>
 				<DropdownMenu.Separator />

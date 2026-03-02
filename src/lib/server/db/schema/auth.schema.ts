@@ -1,6 +1,26 @@
 import { relations } from 'drizzle-orm';
 import { pgTable, text, timestamp, boolean, index } from 'drizzle-orm/pg-core';
 
+export const apiTokens = pgTable(
+	'api_tokens',
+	{
+		id: text('id').primaryKey(),
+		userId: text('user_id')
+			.notNull()
+			.references(() => user.id, { onDelete: 'cascade' }),
+		// SHA-256 hash of the raw token — raw value is shown once and never stored
+		hashedToken: text('hashed_token').notNull().unique(),
+		name: text('name').notNull(),
+		lastUsedAt: timestamp('last_used_at'),
+		expiresAt: timestamp('expires_at'),
+		createdAt: timestamp('created_at').notNull().defaultNow()
+	},
+	(table) => [
+		index('api_tokens_user_idx').on(table.userId),
+		index('api_tokens_hashed_token_idx').on(table.hashedToken)
+	]
+);
+
 export const user = pgTable('user', {
 	id: text('id').primaryKey(),
 	name: text('name').notNull(),
@@ -75,7 +95,15 @@ export const verification = pgTable(
 
 export const userRelations = relations(user, ({ many }) => ({
 	sessions: many(session),
-	accounts: many(account)
+	accounts: many(account),
+	apiTokens: many(apiTokens)
+}));
+
+export const apiTokenRelations = relations(apiTokens, ({ one }) => ({
+	user: one(user, {
+		fields: [apiTokens.userId],
+		references: [user.id]
+	})
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -93,3 +121,4 @@ export const accountRelations = relations(account, ({ one }) => ({
 }));
 
 export type User = typeof user.$inferSelect;
+export type ApiToken = typeof apiTokens.$inferSelect;

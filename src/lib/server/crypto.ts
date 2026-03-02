@@ -122,3 +122,31 @@ export async function decryptSecret(dek: CryptoKey, ciphertext: string): Promise
 	const plain = await aesGcmDecrypt(dek, ciphertext);
 	return decoder.decode(plain);
 }
+
+// ---------------------------------------------------------------------------
+// API token helpers
+// ---------------------------------------------------------------------------
+// Tokens are random 32-byte values encoded as base64url.
+// Only the SHA-256 hash is stored in the DB — the raw token is shown once.
+
+/**
+ * Generates a new random API token.
+ * Returns the raw token (show to the user once) and its SHA-256 hash (store in DB).
+ */
+export async function generateApiToken(): Promise<{ raw: string; hashed: string }> {
+	const bytes = crypto.getRandomValues(new Uint8Array(32));
+	const raw = toBase64url(
+		bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+	);
+	const hashed = await hashToken(raw);
+	return { raw, hashed };
+}
+
+/**
+ * Hashes a raw API token with SHA-256 for safe storage / lookup.
+ */
+export async function hashToken(raw: string): Promise<string> {
+	const encoder = new TextEncoder();
+	const digest = await crypto.subtle.digest('SHA-256', encoder.encode(raw));
+	return toBase64url(digest);
+}
