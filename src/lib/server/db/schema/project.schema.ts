@@ -72,12 +72,6 @@ export const secretVersions = pgTable(
 	]
 );
 
-// ---------------------------------------------------------------------------
-// Environment version snapshots (Git-like history)
-// ---------------------------------------------------------------------------
-// Each time an environment is saved, one environmentVersion row is created.
-// environmentVersionSecrets holds the full key/value snapshot for that version.
-
 export const environmentVersions = pgTable(
 	'environment_versions',
 	{

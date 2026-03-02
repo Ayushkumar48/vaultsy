@@ -1,11 +1,5 @@
 import { env } from '$env/dynamic/private';
 
-// ---------------------------------------------------------------------------
-// Master key bootstrap
-// ---------------------------------------------------------------------------
-// ENCRYPTION_MASTER_KEY must be a 64-character hex string (32 bytes / 256 bits).
-// Generate one with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-
 function getMasterKeyBytes(): Uint8Array {
 	const hex = env.ENCRYPTION_MASTER_KEY;
 	if (!hex || hex.length !== 64) {
@@ -33,11 +27,6 @@ async function importAesKey(rawBytes: Uint8Array, usages: KeyUsage[]): Promise<C
 		usages
 	);
 }
-
-// ---------------------------------------------------------------------------
-// Low-level AES-256-GCM helpers
-// ---------------------------------------------------------------------------
-// Wire format (all base64url): <12-byte IV> + "." + <ciphertext+16-byte auth tag>
 
 function toBase64url(buf: ArrayBuffer): string {
 	return btoa(String.fromCharCode(...new Uint8Array(buf)))
@@ -87,12 +76,6 @@ async function aesGcmDecrypt(key: CryptoKey, token: string): Promise<Uint8Array>
 	return new Uint8Array(plain);
 }
 
-// ---------------------------------------------------------------------------
-// Data Encryption Key (DEK) management
-// ---------------------------------------------------------------------------
-// Each project gets a unique random 256-bit DEK.
-// The DEK itself is encrypted with the server master key before being stored.
-
 /**
  * Generates a new random DEK and returns:
  *  - `dek`          – the raw CryptoKey (use for encrypting secret values)
@@ -102,13 +85,10 @@ export async function generateDek(): Promise<{ dek: CryptoKey; encryptedDek: str
 	const masterKeyBytes = getMasterKeyBytes();
 	const masterKey = await importAesKey(masterKeyBytes, ['encrypt']);
 
-	// Generate raw DEK bytes
 	const dekBytes = crypto.getRandomValues(new Uint8Array(32));
 
-	// Encrypt DEK with master key
 	const encryptedDek = await aesGcmEncrypt(masterKey, dekBytes);
 
-	// Import DEK as a CryptoKey for immediate use
 	const dek = await importAesKey(dekBytes, ['encrypt', 'decrypt']);
 
 	return { dek, encryptedDek };
@@ -125,10 +105,6 @@ export async function decryptDek(encryptedDek: string): Promise<CryptoKey> {
 	const dekBytes = await aesGcmDecrypt(masterKey, encryptedDek);
 	return importAesKey(dekBytes, ['encrypt', 'decrypt']);
 }
-
-// ---------------------------------------------------------------------------
-// Secret value encryption / decryption
-// ---------------------------------------------------------------------------
 
 /**
  * Encrypts a plaintext secret value using the project DEK.

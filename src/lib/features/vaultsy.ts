@@ -14,8 +14,6 @@ export function parseEnvText(text: string): SecretRow[] {
 
 		if (!line) continue;
 		if (line.startsWith('#')) continue;
-
-		// remove `export`
 		if (line.startsWith('export ')) {
 			line = line.replace(/^export\s+/, '');
 		}
