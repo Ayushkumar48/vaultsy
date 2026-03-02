@@ -29,6 +29,7 @@
 			deleteProjectTitle = null;
 		}
 	}
+	const projects = getProjectNames();
 </script>
 
 <div class="space-y-6">
@@ -44,70 +45,68 @@
 		<Input placeholder="Search projects..." bind:value={searchQuery} class="max-w-sm" />
 	</div>
 
-	{#await getProjectNames()}
+	{#if projects.error}
+		<div class="py-12 text-center text-red-500">Failed to load projects</div>
+	{:else if projects.loading}
 		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 			{#each Array(3) as _, index (index)}
 				<Card.Root class="h-32 animate-pulse" />
 			{/each}
 		</div>
-	{:then projects}
-		{#if projects.length === 0}
-			<div class="py-12 text-center text-muted-foreground">No projects found</div>
-		{:else}
-			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-				{#each projects as project (project.id)}
-					<Card.Root
-						class="cursor-pointer transition-all hover:shadow-md"
-						onclick={() => goto(resolve(`/dashboard/projects/${project.id}`))}
-					>
-						<Card.Header class="flex flex-row items-center justify-between pb-2">
-							<Card.Title class="text-lg">
-								{project.title}
-							</Card.Title>
+	{:else}
+		<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+			{#each projects.current as project (project.id)}
+				<Card.Root
+					class="cursor-pointer transition-all hover:shadow-md"
+					onclick={() => goto(resolve(`/dashboard/projects/${project.id}`))}
+				>
+					<Card.Header class="flex flex-row items-center justify-between pb-2">
+						<Card.Title class="text-lg">
+							{project.title}
+						</Card.Title>
 
-							<DropdownMenu.Root>
-								<DropdownMenu.Trigger onclick={(e) => e.stopPropagation()}>
-									<Button variant="ghost" size="icon">⋮</Button>
-								</DropdownMenu.Trigger>
+						<DropdownMenu.Root>
+							<DropdownMenu.Trigger onclick={(e) => e.stopPropagation()}>
+								<Button variant="ghost" size="icon">⋮</Button>
+							</DropdownMenu.Trigger>
 
-								<DropdownMenu.Content align="end">
-									<DropdownMenu.Item
-										onclick={(e) => {
-											e.stopPropagation();
-											goto(resolve(`/dashboard/projects/${project.id}`));
-										}}
-									>
-										View Details
-									</DropdownMenu.Item>
+							<DropdownMenu.Content align="end">
+								<DropdownMenu.Item
+									onclick={(e) => {
+										e.stopPropagation();
+										goto(resolve(`/dashboard/projects/${project.id}`));
+									}}
+								>
+									View Details
+								</DropdownMenu.Item>
 
-									<DropdownMenu.Separator />
+								<DropdownMenu.Separator />
 
-									<DropdownMenu.Item
-										class="text-red-600"
-										onclick={(e) => {
-											e.stopPropagation();
-											deleteProjectId = project.id;
-											deleteProjectTitle = project.title;
-										}}
-									>
-										Delete
-									</DropdownMenu.Item>
-								</DropdownMenu.Content>
-							</DropdownMenu.Root>
-						</Card.Header>
+								<DropdownMenu.Item
+									class="text-red-600"
+									onclick={(e) => {
+										e.stopPropagation();
+										deleteProjectId = project.id;
+										deleteProjectTitle = project.title;
+									}}
+								>
+									Delete
+								</DropdownMenu.Item>
+							</DropdownMenu.Content>
+						</DropdownMenu.Root>
+					</Card.Header>
 
-						<Card.Content>
-							<p class="text-xs text-muted-foreground">
-								Updated {timeAgo(project.updatedAt)}
-							</p>
-						</Card.Content>
-					</Card.Root>
-				{/each}
-			</div>
-		{/if}
-	{:catch}
-		<div class="py-12 text-center text-red-500">Failed to load projects</div>
-	{/await}
+					<Card.Content>
+						<p class="text-xs text-muted-foreground">
+							Updated {timeAgo(project.updatedAt)}
+						</p>
+					</Card.Content>
+				</Card.Root>
+			{:else}
+				<div class="py-12 text-center text-muted-foreground">No projects found</div>
+			{/each}
+		</div>
+	{/if}
 </div>
 
 <AlertDialog.Root

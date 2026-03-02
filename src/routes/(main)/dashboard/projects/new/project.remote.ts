@@ -228,6 +228,8 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 		}
 	});
 
+	await getProjectNames().refresh();
+
 	redirect(303, `/dashboard/projects/${projectId}`);
 });
 
@@ -248,7 +250,7 @@ export const deleteProject = command(DeleteProjectSchema, async ({ id }) => {
 		.innerJoin(user, eq(projects.userId, user.id));
 	if (project.userId !== session.user.id) error(403, 'Forbidden');
 	await db.delete(projects).where(eq(projects.id, id));
-	await getProjectNames().refresh();
+	await getProjectNames({ limit: 5 }).refresh();
 });
 
 export type RemoteUpdateProjectType = typeof updateProject;

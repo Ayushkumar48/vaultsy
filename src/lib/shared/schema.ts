@@ -21,4 +21,11 @@ export const DeleteProjectSchema = z.object({
 	id: z.string().min(1)
 });
 
-export const GetProjectSchemaFilters = z.object({}).optional();
+export const GetProjectSchemaFilters = z
+	.object({
+		title: z.string().optional(),
+		updatedAfter: z.string().optional(),
+		updatedBefore: z.string().optional(),
+		limit: z.number().int().positive().optional()
+	})
+	.optional();
