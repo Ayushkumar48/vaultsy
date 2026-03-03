@@ -18,6 +18,7 @@
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { cn } from '$lib/utils.js';
 	import { UpdateProjectSchema } from '$lib/shared/schema.js';
+	import { EnvironmentType } from '$lib/shared/enums.js';
 
 	let { data } = $props();
 	const project = $derived(data.project);
@@ -25,14 +26,14 @@
 	const fields = updateProject.fields;
 
 	const hasInvalidKeys = $derived(
-		(['development', 'staging', 'preview', 'production'] as const).some((env) =>
+		EnvironmentType.some((env) =>
 			(fields[env].value() ?? []).some((r) => r?.key && !isValidKey(r.key))
 		)
 	);
 	const isPending = $derived(!!updateProject.pending);
 
 	function initializeFields() {
-		for (const env of ['development', 'staging', 'preview', 'production'] as const) {
+		for (const env of EnvironmentType) {
 			const envData = project.environments.find((e) => e.name === env);
 			if (envData && envData.secrets.length > 0) {
 				fields[env].set(

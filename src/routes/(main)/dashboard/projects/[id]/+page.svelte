@@ -3,6 +3,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
 	import { EnvironmentType } from '$lib/shared/enums';
+	import type { Environment } from '$lib/shared/enums';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Download from '@lucide/svelte/icons/download';
 	import Eye from '@lucide/svelte/icons/eye';
@@ -25,7 +26,7 @@
 	let copiedKey: string | null = $state(null);
 
 	let envSubTab: Record<string, 'secrets' | 'history'> = $state(
-		Object.fromEntries(EnvironmentType.map((e) => [e, 'secrets' as const]))
+		Object.fromEntries(EnvironmentType.map((e: Environment) => [e, 'secrets' as const]))
 	);
 
 	async function handleRollback(versionId: string) {

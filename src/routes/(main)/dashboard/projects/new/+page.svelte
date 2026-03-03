@@ -10,11 +10,12 @@
 	import { Spinner } from '$lib/components/ui/spinner';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import { CreateProjectSchema } from '$lib/shared/schema';
+	import { EnvironmentType } from '$lib/shared/enums';
 
 	const fields = createProject.fields;
 
 	const hasInvalidKeys = $derived(
-		(['development', 'staging', 'preview', 'production'] as const).some((env) =>
+		EnvironmentType.some((env) =>
 			(fields[env].value() ?? []).some((r) => r?.key && !isValidKey(r.key))
 		)
 	);

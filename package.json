@@ -3,6 +3,9 @@
 	"private": true,
 	"version": "0.0.1",
 	"type": "module",
+	"workspaces": [
+		"packages/*"
+	],
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
@@ -16,7 +19,10 @@
 		"db:generate": "drizzle-kit generate",
 		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
-		"auth:schema": "npx @better-auth/cli generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes"
+		"auth:schema": "npx @better-auth/cli generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes",
+		"cli:build": "cd packages/shared && npx tsc && cd ../cli && npx tsc",
+		"cli:dev": "cd packages/shared && npx tsc && cd ../cli && npx tsc --watch",
+		"cli:run": "node packages/cli/dist/index.js"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.0.2",
@@ -54,6 +60,7 @@
 		"vite-plugin-devtools-json": "^1.0.0"
 	},
 	"dependencies": {
+		"@vaultsy/shared": "workspace:*",
 		"@neondatabase/serverless": "^1.0.2",
 		"zod": "^4.3.6"
 	}

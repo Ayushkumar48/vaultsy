@@ -30,7 +30,7 @@
 		setTimeout(() => (copiedCli = false), 2000);
 	}
 
-	const tokens = listApiTokens();
+	const tokens = listApiTokens(undefined);
 
 	const fields = createApiToken.fields;
 	const isPending = $derived(!!createApiToken.pending);
@@ -134,7 +134,7 @@
 				class="flex flex-col gap-4 sm:flex-row sm:items-start"
 				{...createApiToken.preflight(CreateTokenSchema).enhance(async ({ form, submit }) => {
 					try {
-						await submit().updates(listApiTokens());
+						await submit().updates(listApiTokens(undefined));
 						const raw = createApiToken.result?.raw;
 						if (raw) {
 							newRawToken = raw;
