@@ -267,7 +267,7 @@ init_config();
 init_api();
 import * as p from "@clack/prompts";
 import chalk from "chalk";
-var DEFAULT_BASE_URL = "https://vaultsy.app";
+var DEFAULT_BASE_URL = "https://vaultsy.vercel.app";
 async function loginCommand(opts) {
   p.intro(chalk.bold.cyan("vaultsy login"));
   const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");

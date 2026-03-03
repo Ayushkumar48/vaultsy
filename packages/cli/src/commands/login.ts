@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { writeConfig } from '../lib/config.js';
 import { getMe, ApiError } from '../lib/api.js';
 
-const DEFAULT_BASE_URL = 'https://vaultsy.app';
+const DEFAULT_BASE_URL = 'https://vaultsy.vercel.app';
 
 export async function loginCommand(opts: { token?: string; baseUrl?: string }): Promise<void> {
 	p.intro(chalk.bold.cyan('vaultsy login'));
