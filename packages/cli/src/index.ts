@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 import { Command } from 'commander';
 import { EnvironmentType } from '@vaultsy/shared';
 import type { Environment } from '@vaultsy/shared';

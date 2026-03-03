@@ -1,170 +1,1351 @@
 #!/usr/bin/env node
-import { Command } from 'commander';
-import { EnvironmentType } from '@vaultsy/shared';
-import { loginCommand } from './commands/login.js';
-import { pullCommand } from './commands/pull.js';
-import { pushCommand } from './commands/push.js';
-import { historyCommand } from './commands/history.js';
-import { rollbackCommand } from './commands/rollback.js';
-import { runCommand } from './commands/run.js';
-const program = new Command();
-program
-    .name('vaultsy')
-    .description('Official CLI for Vaultsy — manage secrets from your terminal')
-    .version('0.1.0');
-// ── login ────────────────────────────────────────────────────────────────────
-program
-    .command('login')
-    .description('Authenticate with your Vaultsy instance and save credentials locally')
-    .option('-t, --token <token>', 'API token (skip the interactive prompt)')
-    .option('-u, --base-url <url>', 'Base URL of your Vaultsy instance (default: https://vaultsy.app)')
-    .action(async (opts) => {
-    await loginCommand(opts);
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// src/lib/config.ts
+var config_exports = {};
+__export(config_exports, {
+  clearConfig: () => clearConfig,
+  configExists: () => configExists,
+  readConfig: () => readConfig,
+  writeConfig: () => writeConfig
 });
-// ── logout ───────────────────────────────────────────────────────────────────
-program
-    .command('logout')
-    .description('Remove locally stored credentials (~/.vaultsy/config.json)')
-    .action(async () => {
-    const { clearConfig, configExists } = await import('./lib/config.js');
-    const p = await import('@clack/prompts');
-    const chalk = (await import('chalk')).default;
-    if (!configExists()) {
-        p.log.warn('No credentials found — already logged out.');
-        return;
+import { homedir } from "os";
+import { join } from "path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, unlinkSync } from "fs";
+function configExists() {
+  return existsSync(CONFIG_FILE);
+}
+function readConfig() {
+  if (!existsSync(CONFIG_FILE)) {
+    throw new Error("Not logged in. Run `vaultsy login` first.");
+  }
+  try {
+    const raw = readFileSync(CONFIG_FILE, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (!parsed.token || !parsed.baseUrl) {
+      throw new Error("Config file is corrupted. Run `vaultsy login` to re-authenticate.");
     }
-    clearConfig();
-    p.log.success(chalk.green('✓') + ' Logged out. Credentials removed.');
+    return parsed;
+  } catch (err) {
+    if (err instanceof SyntaxError) {
+      throw new Error("Config file is corrupted. Run `vaultsy login` to re-authenticate.");
+    }
+    throw err;
+  }
+}
+function writeConfig(config) {
+  if (!existsSync(CONFIG_DIR)) {
+    mkdirSync(CONFIG_DIR, { recursive: true, mode: 448 });
+  }
+  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2) + "\n", {
+    encoding: "utf-8",
+    mode: 384
+    // owner read/write only — never group or world readable
+  });
+}
+function clearConfig() {
+  if (existsSync(CONFIG_FILE)) {
+    writeFileSync(CONFIG_FILE, "", { mode: 384 });
+    unlinkSync(CONFIG_FILE);
+  }
+}
+var CONFIG_DIR, CONFIG_FILE;
+var init_config = __esm({
+  "src/lib/config.ts"() {
+    "use strict";
+    CONFIG_DIR = join(homedir(), ".vaultsy");
+    CONFIG_FILE = join(CONFIG_DIR, "config.json");
+  }
 });
-// ── pull ─────────────────────────────────────────────────────────────────────
-program
-    .command('pull [project] [env]')
-    .description('Pull secrets from Vaultsy and write them to a local .env file')
-    .option('-o, --output <file>', 'Output file path (default: .env or .env.<env>)')
-    .option('-y, --yes', 'Skip confirmation prompts')
-    .action(async (project, env, opts) => {
+
+// src/lib/api.ts
+var api_exports = {};
+__export(api_exports, {
+  ApiError: () => ApiError,
+  getMe: () => getMe,
+  listProjects: () => listProjects,
+  listVersions: () => listVersions,
+  pullSecrets: () => pullSecrets,
+  pushSecrets: () => pushSecrets,
+  rollback: () => rollback
+});
+async function apiFetch(path, options = {}) {
+  const { baseUrl, token, ...fetchOptions } = options;
+  let resolvedBase = baseUrl;
+  let resolvedToken = token;
+  if (!resolvedBase || !resolvedToken) {
+    const cfg = readConfig();
+    resolvedBase ??= cfg.baseUrl;
+    resolvedToken ??= cfg.token;
+  }
+  const url = `${resolvedBase.replace(/\/$/, "")}${path}`;
+  const headers = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${resolvedToken}`,
+    ...fetchOptions.headers
+  };
+  const res = await fetch(url, { ...fetchOptions, headers });
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body?.message) message = body.message;
+    } catch {
+    }
+    throw new ApiError(res.status, message);
+  }
+  return res.json();
+}
+async function getMe(opts) {
+  return apiFetch("/api/v1/me", opts);
+}
+async function listProjects() {
+  const res = await apiFetch("/api/v1/projects");
+  return res.projects;
+}
+async function pullSecrets(projectId, env) {
+  return apiFetch(`/api/v1/projects/${projectId}/envs/${env}`);
+}
+async function pushSecrets(projectId, env, secrets) {
+  return apiFetch(`/api/v1/projects/${projectId}/envs/${env}`, {
+    method: "POST",
+    body: JSON.stringify({ secrets })
+  });
+}
+async function listVersions(projectId, env) {
+  return apiFetch(`/api/v1/projects/${projectId}/envs/${env}/versions`);
+}
+async function rollback(projectId, env, versionId) {
+  return apiFetch(`/api/v1/projects/${projectId}/envs/${env}/rollback`, {
+    method: "POST",
+    body: JSON.stringify({ versionId })
+  });
+}
+var ApiError;
+var init_api = __esm({
+  "src/lib/api.ts"() {
+    "use strict";
+    init_config();
+    ApiError = class extends Error {
+      constructor(status, message) {
+        super(message);
+        this.status = status;
+        this.name = "ApiError";
+      }
+    };
+  }
+});
+
+// src/lib/env.ts
+var env_exports = {};
+__export(env_exports, {
+  envFileName: () => envFileName,
+  findProjectConfig: () => findProjectConfig,
+  isGitIgnored: () => isGitIgnored,
+  parseEnvText: () => parseEnvText,
+  readEnvFile: () => readEnvFile,
+  serializeEnvText: () => serializeEnvText,
+  writeEnvFile: () => writeEnvFile,
+  writeProjectConfig: () => writeProjectConfig
+});
+import { readFileSync as readFileSync2, writeFileSync as writeFileSync2, existsSync as existsSync2 } from "fs";
+import { join as join2, resolve } from "path";
+function parseEnvText(text2) {
+  const lines = text2.split(/\r?\n/);
+  const result = [];
+  for (const rawLine of lines) {
+    let line = rawLine.trim();
+    if (!line) continue;
+    if (line.startsWith("#")) continue;
+    if (line.startsWith("export ")) {
+      line = line.replace(/^export\s+/, "");
+    }
+    const equalIndex = line.indexOf("=");
+    if (equalIndex === -1) continue;
+    const key = line.slice(0, equalIndex).trim();
+    let value = line.slice(equalIndex + 1).trim();
+    const isDoubleQuoted = value.startsWith('"') && value.endsWith('"');
+    const isSingleQuoted = value.startsWith("'") && value.endsWith("'");
+    if (!isDoubleQuoted && !isSingleQuoted) {
+      const commentIndex = value.indexOf(" #");
+      if (commentIndex !== -1) {
+        value = value.slice(0, commentIndex).trim();
+      }
+    }
+    if (isDoubleQuoted || isSingleQuoted) {
+      value = value.slice(1, -1);
+    }
+    if (key) {
+      result.push({ key, value });
+    }
+  }
+  return result;
+}
+function serializeEnvText(rows) {
+  const lines = rows.map(({ key, value }) => {
+    const needsQuoting = value === "" || /[\s#$"'\\`]/.test(value);
+    if (needsQuoting) {
+      const escaped = value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+      return `${key}="${escaped}"`;
+    }
+    return `${key}=${value}`;
+  });
+  return lines.join("\n") + "\n";
+}
+function readEnvFile(filePath) {
+  if (!existsSync2(filePath)) return [];
+  const raw = readFileSync2(filePath, "utf-8");
+  return parseEnvText(raw);
+}
+function writeEnvFile(filePath, rows) {
+  writeFileSync2(filePath, serializeEnvText(rows), { encoding: "utf-8" });
+}
+function findProjectConfig(dir = process.cwd()) {
+  let current = resolve(dir);
+  while (true) {
+    const candidate = join2(current, VAULTSY_JSON);
+    if (existsSync2(candidate)) {
+      try {
+        const raw = readFileSync2(candidate, "utf-8");
+        const parsed = JSON.parse(raw);
+        if (parsed.project && typeof parsed.project === "string") {
+          return { config: parsed, dir: current };
+        }
+      } catch {
+      }
+    }
+    const parent = resolve(current, "..");
+    if (parent === current) break;
+    current = parent;
+  }
+  return null;
+}
+function writeProjectConfig(config, dir = process.cwd()) {
+  writeFileSync2(join2(dir, VAULTSY_JSON), JSON.stringify(config, null, 2) + "\n", {
+    encoding: "utf-8"
+  });
+}
+function isGitIgnored(filename, dir = process.cwd()) {
+  const gitignorePath = join2(dir, ".gitignore");
+  if (!existsSync2(gitignorePath)) return false;
+  const lines = readFileSync2(gitignorePath, "utf-8").split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith("#"));
+  return lines.some((pattern) => {
+    if (pattern === filename) return true;
+    if (pattern.startsWith("*.") && filename.endsWith(pattern.slice(1))) return true;
+    if (pattern === ".env*" && filename.startsWith(".env")) return true;
+    if (pattern === ".env.*" && /^\.env\..+/.test(filename)) return true;
+    return false;
+  });
+}
+function envFileName(env) {
+  return env === "development" ? ".env" : `.env.${env}`;
+}
+var VAULTSY_JSON;
+var init_env = __esm({
+  "src/lib/env.ts"() {
+    "use strict";
+    VAULTSY_JSON = "vaultsy.json";
+  }
+});
+
+// src/index.ts
+import { Command } from "commander";
+
+// ../shared/dist/enums.js
+var EnvironmentType = ["development", "staging", "preview", "production"];
+
+// src/commands/login.ts
+init_config();
+init_api();
+init_api();
+import * as p from "@clack/prompts";
+import chalk from "chalk";
+async function loginCommand(opts) {
+  p.intro(chalk.bold.cyan("vaultsy login"));
+  let baseUrl;
+  if (opts.baseUrl) {
+    baseUrl = opts.baseUrl;
+  } else if (configExists()) {
+    try {
+      baseUrl = readConfig().baseUrl;
+    } catch {
+      baseUrl = "https://vaultsy.app";
+    }
+  } else {
+    baseUrl = "https://vaultsy.app";
+  }
+  const resolvedBaseUrl = await p.text({
+    message: "Vaultsy base URL",
+    placeholder: "https://vaultsy.app",
+    initialValue: baseUrl,
+    validate(value) {
+      if (!value.trim()) return "Base URL is required.";
+      try {
+        new URL(value.trim());
+      } catch {
+        return "Enter a valid URL (e.g. https://vaultsy.app).";
+      }
+    }
+  });
+  if (p.isCancel(resolvedBaseUrl)) {
+    p.cancel("Login cancelled.");
+    process.exit(0);
+  }
+  let token;
+  if (opts.token) {
+    token = opts.token;
+  } else {
+    p.log.info(
+      `Create a token at ${chalk.cyan(resolvedBaseUrl.replace(/\/$/, "") + "/dashboard/settings")}`
+    );
+    const input = await p.password({
+      message: "Paste your API token",
+      validate(value) {
+        if (!value.trim()) return "Token is required.";
+      }
+    });
+    if (p.isCancel(input)) {
+      p.cancel("Login cancelled.");
+      process.exit(0);
+    }
+    token = input.trim();
+  }
+  const spinner7 = p.spinner();
+  spinner7.start("Verifying token\u2026");
+  let userName;
+  let userEmail;
+  try {
+    const me = await getMe({
+      baseUrl: resolvedBaseUrl.trim().replace(/\/$/, ""),
+      token
+    });
+    userName = me.name;
+    userEmail = me.email;
+    spinner7.stop("Token verified.");
+  } catch (err) {
+    spinner7.stop("Verification failed.");
+    if (err instanceof ApiError) {
+      if (err.status === 401) {
+        p.log.error("Invalid or expired token. Generate a new one and try again.");
+      } else {
+        p.log.error(`Server responded with ${err.status}: ${err.message}`);
+      }
+    } else {
+      p.log.error(
+        `Could not reach ${resolvedBaseUrl}. Check the URL and your network connection.`
+      );
+    }
+    process.exit(1);
+  }
+  writeConfig({
+    token,
+    baseUrl: resolvedBaseUrl.trim().replace(/\/$/, "")
+  });
+  p.outro(
+    `${chalk.green("\u2713")} Logged in as ${chalk.bold(userName)} ${chalk.dim(`<${userEmail}>`)}
+  Config saved to ${chalk.dim("~/.vaultsy/config.json")}`
+  );
+}
+
+// src/commands/pull.ts
+import * as p2 from "@clack/prompts";
+import chalk2 from "chalk";
+import { resolve as resolve2 } from "path";
+init_api();
+init_env();
+async function pullCommand(projectArg, envArg, opts) {
+  p2.intro(chalk2.bold.cyan("vaultsy pull"));
+  let projectId;
+  let projectTitle;
+  if (projectArg) {
+    projectId = projectArg;
+  } else {
+    const found = findProjectConfig();
+    if (found) {
+      projectId = found.config.project;
+      p2.log.info(`Using project ${chalk2.cyan(projectId)} from ${chalk2.dim("vaultsy.json")}`);
+    } else {
+      const spinner8 = p2.spinner();
+      spinner8.start("Fetching projects\u2026");
+      let projects;
+      try {
+        projects = await listProjects();
+        spinner8.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+      } catch (err) {
+        spinner8.stop("Failed to fetch projects.");
+        printApiError(err);
+        process.exit(1);
+      }
+      if (projects.length === 0) {
+        p2.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+        process.exit(1);
+      }
+      const selected = await p2.select({
+        message: "Select a project",
+        options: projects.map((proj) => ({
+          value: proj.id,
+          label: proj.title,
+          hint: proj.id
+        }))
+      });
+      if (p2.isCancel(selected)) {
+        p2.cancel("Pull cancelled.");
+        process.exit(0);
+      }
+      projectId = selected;
+      projectTitle = projects.find((proj) => proj.id === selected)?.title;
+    }
+  }
+  let env;
+  if (envArg) {
+    if (!EnvironmentType.includes(envArg)) {
+      p2.log.error(
+        `Invalid environment "${envArg}". Must be one of: ${EnvironmentType.join(", ")}.`
+      );
+      process.exit(1);
+    }
+    env = envArg;
+  } else {
+    const found = findProjectConfig();
+    const defaultEnv = found?.config.defaultEnv;
+    const selected = await p2.select({
+      message: "Select an environment",
+      options: EnvironmentType.map((e) => ({
+        value: e,
+        label: e,
+        hint: e === defaultEnv ? "default" : void 0
+      })),
+      initialValue: defaultEnv ?? "development"
+    });
+    if (p2.isCancel(selected)) {
+      p2.cancel("Pull cancelled.");
+      process.exit(0);
+    }
+    env = selected;
+  }
+  const filename = opts.output ?? envFileName(env);
+  const outputPath = resolve2(process.cwd(), filename);
+  if (!opts.yes && !isGitIgnored(filename)) {
+    p2.log.warn(
+      `${chalk2.yellow(filename)} does not appear to be in ${chalk2.dim(".gitignore")}.
+  Make sure you don't accidentally commit secrets to version control.`
+    );
+    const confirmed = await p2.confirm({
+      message: "Continue anyway?",
+      initialValue: false
+    });
+    if (p2.isCancel(confirmed) || !confirmed) {
+      p2.cancel("Pull cancelled.");
+      process.exit(0);
+    }
+  }
+  const spinner7 = p2.spinner();
+  spinner7.start(`Pulling ${chalk2.cyan(env)} secrets\u2026`);
+  let result;
+  try {
+    result = await pullSecrets(projectId, env);
+    spinner7.stop(
+      `Pulled ${result.secrets.length} secret${result.secrets.length !== 1 ? "s" : ""} from ${chalk2.bold(projectTitle ?? result.project.title)} / ${chalk2.cyan(env)}.`
+    );
+  } catch (err) {
+    spinner7.stop("Pull failed.");
+    printApiError(err);
+    process.exit(1);
+  }
+  if (result.secrets.length === 0) {
+    p2.log.warn(`No secrets found for the ${chalk2.cyan(env)} environment.`);
+    p2.outro(chalk2.dim("Nothing written."));
+    return;
+  }
+  writeEnvFile(outputPath, result.secrets);
+  p2.outro(
+    `${chalk2.green("\u2713")} Written to ${chalk2.bold(filename)}
+  ${chalk2.dim(outputPath)}`
+  );
+}
+function printApiError(err) {
+  if (err instanceof ApiError) {
+    if (err.status === 401) {
+      p2.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
+    } else if (err.status === 404) {
+      p2.log.error("Project or environment not found. Check the project ID and environment name.");
+    } else {
+      p2.log.error(`API error ${err.status}: ${err.message}`);
+    }
+  } else if (err instanceof Error) {
+    p2.log.error(err.message);
+  } else {
+    p2.log.error("An unexpected error occurred.");
+  }
+}
+
+// src/commands/push.ts
+import * as p3 from "@clack/prompts";
+import chalk3 from "chalk";
+import { resolve as resolve3 } from "path";
+import { existsSync as existsSync3 } from "fs";
+init_api();
+init_env();
+async function pushCommand(projectArg, envArg, opts) {
+  p3.intro(chalk3.bold.cyan("vaultsy push"));
+  let projectId;
+  let projectTitle;
+  if (projectArg) {
+    projectId = projectArg;
+  } else {
+    const found = findProjectConfig();
+    if (found) {
+      projectId = found.config.project;
+      p3.log.info(`Using project ${chalk3.cyan(projectId)} from ${chalk3.dim("vaultsy.json")}`);
+    } else {
+      const spinner7 = p3.spinner();
+      spinner7.start("Fetching projects\u2026");
+      let projects;
+      try {
+        projects = await listProjects();
+        spinner7.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+      } catch (err) {
+        spinner7.stop("Failed to fetch projects.");
+        printApiError2(err);
+        process.exit(1);
+      }
+      if (projects.length === 0) {
+        p3.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+        process.exit(1);
+      }
+      const selected = await p3.select({
+        message: "Select a project",
+        options: projects.map((proj) => ({
+          value: proj.id,
+          label: proj.title,
+          hint: proj.id
+        }))
+      });
+      if (p3.isCancel(selected)) {
+        p3.cancel("Push cancelled.");
+        process.exit(0);
+      }
+      projectId = selected;
+      projectTitle = projects.find((proj) => proj.id === selected)?.title;
+    }
+  }
+  let env;
+  if (envArg) {
+    if (!EnvironmentType.includes(envArg)) {
+      p3.log.error(
+        `Invalid environment "${envArg}". Must be one of: ${EnvironmentType.join(", ")}.`
+      );
+      process.exit(1);
+    }
+    env = envArg;
+  } else {
+    const found = findProjectConfig();
+    const defaultEnv = found?.config.defaultEnv;
+    const selected = await p3.select({
+      message: "Select an environment",
+      options: EnvironmentType.map((e) => ({
+        value: e,
+        label: e,
+        hint: e === defaultEnv ? "default" : void 0
+      })),
+      initialValue: defaultEnv ?? "development"
+    });
+    if (p3.isCancel(selected)) {
+      p3.cancel("Push cancelled.");
+      process.exit(0);
+    }
+    env = selected;
+  }
+  const filename = opts.input ?? envFileName(env);
+  const inputPath = resolve3(process.cwd(), filename);
+  if (!existsSync3(inputPath)) {
+    p3.log.error(
+      `File ${chalk3.bold(filename)} not found.
+  Run ${chalk3.cyan(`vaultsy pull ${projectId} ${env}`)} first, or specify a file with ${chalk3.dim("--input <file>")}.`
+    );
+    process.exit(1);
+  }
+  const localSecrets = readEnvFile(inputPath).filter((r) => r.key && r.value);
+  if (localSecrets.length === 0) {
+    p3.log.warn(`${chalk3.bold(filename)} is empty or contains no valid KEY=VALUE pairs.`);
+    p3.outro(chalk3.dim("Nothing pushed."));
+    return;
+  }
+  p3.log.info(
+    `Read ${chalk3.bold(String(localSecrets.length))} secret${localSecrets.length !== 1 ? "s" : ""} from ${chalk3.bold(filename)}.`
+  );
+  const diffSpinner = p3.spinner();
+  diffSpinner.start("Computing diff against remote\u2026");
+  let remoteSecrets;
+  let resolvedTitle;
+  try {
+    const remote = await pullSecrets(projectId, env);
+    remoteSecrets = remote.secrets;
+    resolvedTitle = projectTitle ?? remote.project.title;
+    diffSpinner.stop("Diff computed.");
+  } catch (err) {
+    diffSpinner.stop("Failed to fetch remote secrets.");
+    printApiError2(err);
+    process.exit(1);
+  }
+  const diff = computeDiff(remoteSecrets, localSecrets);
+  printDiff(diff);
+  const hasChanges = diff.added.length > 0 || diff.modified.length > 0 || diff.removed.length > 0;
+  if (!hasChanges) {
+    p3.outro(`${chalk3.dim("No changes.")} Remote ${chalk3.cyan(env)} is already up to date.`);
+    return;
+  }
+  if (!opts.yes) {
+    const confirmed = await p3.confirm({
+      message: `Push these changes to ${chalk3.bold(resolvedTitle)} / ${chalk3.cyan(env)}?`,
+      initialValue: true
+    });
+    if (p3.isCancel(confirmed) || !confirmed) {
+      p3.cancel("Push cancelled.");
+      process.exit(0);
+    }
+  }
+  const pushSpinner = p3.spinner();
+  pushSpinner.start(`Pushing to ${chalk3.cyan(env)}\u2026`);
+  try {
+    const result = await pushSecrets(projectId, env, localSecrets);
+    const { added, modified, removed, unchanged } = result.changes;
+    pushSpinner.stop(
+      `Done. ${chalk3.green(`+${added}`)} added, ${chalk3.yellow(`~${modified}`)} modified, ${chalk3.red(`-${removed}`)} removed, ${chalk3.dim(`${unchanged} unchanged`)}.`
+    );
+  } catch (err) {
+    pushSpinner.stop("Push failed.");
+    printApiError2(err);
+    process.exit(1);
+  }
+  p3.outro(
+    `${chalk3.green("\u2713")} ${chalk3.bold(resolvedTitle)} / ${chalk3.cyan(env)} updated successfully.`
+  );
+}
+function computeDiff(remote, local) {
+  const remoteMap = new Map(remote.map((r) => [r.key, r.value]));
+  const localMap = new Map(local.map((r) => [r.key, r.value]));
+  const added = [];
+  const modified = [];
+  const removed = [];
+  const unchanged = [];
+  for (const [key, value] of localMap) {
+    if (!remoteMap.has(key)) {
+      added.push(key);
+    } else if (remoteMap.get(key) !== value) {
+      modified.push(key);
+    } else {
+      unchanged.push(key);
+    }
+  }
+  for (const key of remoteMap.keys()) {
+    if (!localMap.has(key)) {
+      removed.push(key);
+    }
+  }
+  added.sort();
+  modified.sort();
+  removed.sort();
+  unchanged.sort();
+  return { added, modified, removed, unchanged };
+}
+function printDiff(diff) {
+  const total = diff.added.length + diff.modified.length + diff.removed.length + diff.unchanged.length;
+  if (total === 0) {
+    p3.log.info(chalk3.dim("No secrets on remote or local."));
+    return;
+  }
+  const lines = [];
+  for (const key of diff.added) {
+    lines.push(`  ${chalk3.green("+")} ${chalk3.green(key)}`);
+  }
+  for (const key of diff.modified) {
+    lines.push(`  ${chalk3.yellow("~")} ${chalk3.yellow(key)}`);
+  }
+  for (const key of diff.removed) {
+    lines.push(`  ${chalk3.red("-")} ${chalk3.red(key)}`);
+  }
+  for (const key of diff.unchanged) {
+    lines.push(`  ${chalk3.dim("\xB7")} ${chalk3.dim(key)}`);
+  }
+  p3.log.message(lines.join("\n"));
+  const summary = [
+    diff.added.length > 0 ? chalk3.green(`+${diff.added.length} to add`) : null,
+    diff.modified.length > 0 ? chalk3.yellow(`~${diff.modified.length} to modify`) : null,
+    diff.removed.length > 0 ? chalk3.red(`-${diff.removed.length} to remove`) : null,
+    diff.unchanged.length > 0 ? chalk3.dim(`${diff.unchanged.length} unchanged`) : null
+  ].filter(Boolean).join(chalk3.dim(", "));
+  p3.log.info(summary);
+}
+function printApiError2(err) {
+  if (err instanceof ApiError) {
+    if (err.status === 401) {
+      p3.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
+    } else if (err.status === 404) {
+      p3.log.error("Project or environment not found. Check the project ID and environment name.");
+    } else {
+      p3.log.error(`API error ${err.status}: ${err.message}`);
+    }
+  } else if (err instanceof Error) {
+    p3.log.error(err.message);
+  } else {
+    p3.log.error("An unexpected error occurred.");
+  }
+}
+
+// src/commands/history.ts
+import * as p4 from "@clack/prompts";
+import chalk4 from "chalk";
+init_api();
+init_env();
+async function historyCommand(projectArg, envArg) {
+  p4.intro(chalk4.bold.cyan("vaultsy history"));
+  let projectId;
+  let projectTitle;
+  if (projectArg) {
+    projectId = projectArg;
+  } else {
+    const found = findProjectConfig();
+    if (found) {
+      projectId = found.config.project;
+      p4.log.info(`Using project ${chalk4.cyan(projectId)} from ${chalk4.dim("vaultsy.json")}`);
+    } else {
+      const spinner8 = p4.spinner();
+      spinner8.start("Fetching projects\u2026");
+      let projects;
+      try {
+        projects = await listProjects();
+        spinner8.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+      } catch (err) {
+        spinner8.stop("Failed to fetch projects.");
+        printApiError3(err);
+        process.exit(1);
+      }
+      if (projects.length === 0) {
+        p4.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+        process.exit(1);
+      }
+      const selected = await p4.select({
+        message: "Select a project",
+        options: projects.map((proj) => ({
+          value: proj.id,
+          label: proj.title,
+          hint: proj.id
+        }))
+      });
+      if (p4.isCancel(selected)) {
+        p4.cancel("Cancelled.");
+        process.exit(0);
+      }
+      projectId = selected;
+      projectTitle = projects.find((proj) => proj.id === selected)?.title;
+    }
+  }
+  let env;
+  if (envArg) {
+    if (!EnvironmentType.includes(envArg)) {
+      p4.log.error(
+        `Invalid environment "${envArg}". Must be one of: ${EnvironmentType.join(", ")}.`
+      );
+      process.exit(1);
+    }
+    env = envArg;
+  } else {
+    const found = findProjectConfig();
+    const defaultEnv = found?.config.defaultEnv;
+    const selected = await p4.select({
+      message: "Select an environment",
+      options: EnvironmentType.map((e) => ({
+        value: e,
+        label: e,
+        hint: e === defaultEnv ? "default" : void 0
+      })),
+      initialValue: defaultEnv ?? "development"
+    });
+    if (p4.isCancel(selected)) {
+      p4.cancel("Cancelled.");
+      process.exit(0);
+    }
+    env = selected;
+  }
+  const spinner7 = p4.spinner();
+  spinner7.start(`Fetching history for ${chalk4.cyan(env)}\u2026`);
+  let result;
+  try {
+    result = await listVersions(projectId, env);
+    spinner7.stop(
+      `${result.versions.length} snapshot${result.versions.length !== 1 ? "s" : ""} for ${chalk4.bold(projectTitle ?? result.project.title)} / ${chalk4.cyan(env)}.`
+    );
+  } catch (err) {
+    spinner7.stop("Failed to fetch history.");
+    printApiError3(err);
+    process.exit(1);
+  }
+  if (result.versions.length === 0) {
+    p4.log.warn(`No version history found for the ${chalk4.cyan(env)} environment.`);
+    p4.outro(chalk4.dim("Nothing to show."));
+    return;
+  }
+  const COL_VER = 7;
+  const COL_SECRETS = 7;
+  const COL_BY = 20;
+  const COL_DATE = 22;
+  const header = chalk4.bold(padEnd("#", COL_VER)) + chalk4.dim(" \u2502 ") + chalk4.bold(padEnd("VERSION ID", 26)) + chalk4.dim(" \u2502 ") + chalk4.bold(padEnd("KEYS", COL_SECRETS)) + chalk4.dim(" \u2502 ") + chalk4.bold(padEnd("CREATED BY", COL_BY)) + chalk4.dim(" \u2502 ") + chalk4.bold(padEnd("DATE", COL_DATE));
+  const divider = chalk4.dim(
+    "\u2500".repeat(COL_VER) + "\u2500\u253C\u2500" + "\u2500".repeat(26) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_SECRETS) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_BY) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_DATE)
+  );
+  const rows = result.versions.map((v, i) => {
+    const isLatest = i === 0;
+    const vNum = isLatest ? chalk4.green(padEnd(`v${v.versionNumber}`, COL_VER)) : chalk4.dim(padEnd(`v${v.versionNumber}`, COL_VER));
+    const vId = chalk4.dim(padEnd(v.id, 26));
+    const secrets = padEnd(String(v.secretCount), COL_SECRETS);
+    const by = padEnd(v.createdBy?.name ?? chalk4.italic("system"), COL_BY);
+    const date = padEnd(formatDate(v.createdAt), COL_DATE);
+    const latestBadge = isLatest ? chalk4.green(" \u2190 latest") : "";
+    return vNum + chalk4.dim(" \u2502 ") + vId + chalk4.dim(" \u2502 ") + secrets + chalk4.dim(" \u2502 ") + by + chalk4.dim(" \u2502 ") + date + latestBadge;
+  });
+  const lines = [header, divider, ...rows];
+  p4.log.message(lines.join("\n"));
+  p4.log.info(
+    `To rollback, run: ${chalk4.cyan(`vaultsy rollback ${projectId} ${env} <VERSION_ID>`)}`
+  );
+  p4.outro(chalk4.dim("Done."));
+}
+var ANSI_REGEX = new RegExp("\x1B\\[[0-9;]*m", "g");
+function padEnd(str, length) {
+  const visible = str.replace(ANSI_REGEX, "");
+  const pad = Math.max(0, length - visible.length);
+  return str + " ".repeat(pad);
+}
+function formatDate(iso) {
+  const d = new Date(iso);
+  const date = d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  });
+  const time = d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  return `${date}, ${time}`;
+}
+function printApiError3(err) {
+  if (err instanceof ApiError) {
+    if (err.status === 401) {
+      p4.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
+    } else if (err.status === 404) {
+      p4.log.error("Project or environment not found. Check the project ID and environment name.");
+    } else {
+      p4.log.error(`API error ${err.status}: ${err.message}`);
+    }
+  } else if (err instanceof Error) {
+    p4.log.error(err.message);
+  } else {
+    p4.log.error("An unexpected error occurred.");
+  }
+}
+
+// src/commands/rollback.ts
+import * as p5 from "@clack/prompts";
+import chalk5 from "chalk";
+init_api();
+init_env();
+async function rollbackCommand(projectArg, envArg, versionIdArg, opts) {
+  p5.intro(chalk5.bold.cyan("vaultsy rollback"));
+  let projectId;
+  let projectTitle;
+  if (projectArg) {
+    projectId = projectArg;
+  } else {
+    const found = findProjectConfig();
+    if (found) {
+      projectId = found.config.project;
+      p5.log.info(`Using project ${chalk5.cyan(projectId)} from ${chalk5.dim("vaultsy.json")}`);
+    } else {
+      const spinner8 = p5.spinner();
+      spinner8.start("Fetching projects\u2026");
+      let projects;
+      try {
+        projects = await listProjects();
+        spinner8.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+      } catch (err) {
+        spinner8.stop("Failed to fetch projects.");
+        printApiError4(err);
+        process.exit(1);
+      }
+      if (projects.length === 0) {
+        p5.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+        process.exit(1);
+      }
+      const selected = await p5.select({
+        message: "Select a project",
+        options: projects.map((proj) => ({
+          value: proj.id,
+          label: proj.title,
+          hint: proj.id
+        }))
+      });
+      if (p5.isCancel(selected)) {
+        p5.cancel("Rollback cancelled.");
+        process.exit(0);
+      }
+      projectId = selected;
+      projectTitle = projects.find((proj) => proj.id === selected)?.title;
+    }
+  }
+  let env;
+  if (envArg) {
+    if (!EnvironmentType.includes(envArg)) {
+      p5.log.error(
+        `Invalid environment "${envArg}". Must be one of: ${EnvironmentType.join(", ")}.`
+      );
+      process.exit(1);
+    }
+    env = envArg;
+  } else {
+    const found = findProjectConfig();
+    const defaultEnv = found?.config.defaultEnv;
+    const selected = await p5.select({
+      message: "Select an environment",
+      options: EnvironmentType.map((e) => ({
+        value: e,
+        label: e,
+        hint: e === defaultEnv ? "default" : void 0
+      })),
+      initialValue: defaultEnv ?? "development"
+    });
+    if (p5.isCancel(selected)) {
+      p5.cancel("Rollback cancelled.");
+      process.exit(0);
+    }
+    env = selected;
+  }
+  let versionId;
+  let versionNumber;
+  if (versionIdArg) {
+    versionId = versionIdArg;
+  } else {
+    const spinner8 = p5.spinner();
+    spinner8.start(`Fetching version history for ${chalk5.cyan(env)}\u2026`);
+    let versionsResult;
+    try {
+      versionsResult = await listVersions(projectId, env);
+      spinner8.stop(
+        `Found ${versionsResult.versions.length} snapshot${versionsResult.versions.length !== 1 ? "s" : ""}.`
+      );
+    } catch (err) {
+      spinner8.stop("Failed to fetch version history.");
+      printApiError4(err);
+      process.exit(1);
+    }
+    if (versionsResult.versions.length === 0) {
+      p5.log.error(`No version history found for the ${chalk5.cyan(env)} environment.`);
+      process.exit(1);
+    }
+    const pickable = versionsResult.versions;
+    const selected = await p5.select({
+      message: "Select a version to roll back to",
+      options: pickable.map((v, i) => ({
+        value: v.id,
+        label: `v${v.versionNumber}  \u2014  ${v.secretCount} key${v.secretCount !== 1 ? "s" : ""}  \u2014  ${formatDate2(v.createdAt)}`,
+        hint: i === 0 ? "current" : v.createdBy?.name ? `by ${v.createdBy.name}` : void 0
+      }))
+    });
+    if (p5.isCancel(selected)) {
+      p5.cancel("Rollback cancelled.");
+      process.exit(0);
+    }
+    versionId = selected;
+    versionNumber = versionsResult.versions.find((v) => v.id === selected)?.versionNumber;
+    projectTitle ??= versionsResult.project.title;
+  }
+  if (!opts.yes) {
+    const label = versionNumber !== void 0 ? `v${versionNumber} (${chalk5.dim(versionId)})` : chalk5.dim(versionId);
+    p5.log.warn(
+      `This will overwrite all ${chalk5.bold(env)} secrets with the state from snapshot ${label}.
+  A new snapshot will be created automatically so you can undo this rollback too.`
+    );
+    const confirmed = await p5.confirm({
+      message: `Roll back ${chalk5.bold(projectTitle ?? projectId)} / ${chalk5.cyan(env)} to ${label}?`,
+      initialValue: false
+    });
+    if (p5.isCancel(confirmed) || !confirmed) {
+      p5.cancel("Rollback cancelled.");
+      process.exit(0);
+    }
+  }
+  const spinner7 = p5.spinner();
+  spinner7.start("Rolling back\u2026");
+  try {
+    const result = await rollback(projectId, env, versionId);
+    const { added, modified, removed, unchanged } = result.changes;
+    spinner7.stop(
+      `Rolled back to v${result.rolledBackTo.versionNumber}. ${chalk5.green(`+${added}`)} added, ${chalk5.yellow(`~${modified}`)} modified, ${chalk5.red(`-${removed}`)} removed, ${chalk5.dim(`${unchanged} unchanged`)}.`
+    );
+    p5.outro(
+      `${chalk5.green("\u2713")} ${chalk5.bold(projectTitle ?? result.project.title)} / ${chalk5.cyan(env)} rolled back to ${chalk5.bold(`v${result.rolledBackTo.versionNumber}`)}.`
+    );
+  } catch (err) {
+    spinner7.stop("Rollback failed.");
+    printApiError4(err);
+    process.exit(1);
+  }
+}
+function formatDate2(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  }) + ", " + d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+function printApiError4(err) {
+  if (err instanceof ApiError) {
+    if (err.status === 401) {
+      p5.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
+    } else if (err.status === 404) {
+      p5.log.error("Project or environment not found. Check the project ID and environment name.");
+    } else {
+      p5.log.error(`API error ${err.status}: ${err.message}`);
+    }
+  } else if (err instanceof Error) {
+    p5.log.error(err.message);
+  } else {
+    p5.log.error("An unexpected error occurred.");
+  }
+}
+
+// src/commands/run.ts
+import * as p6 from "@clack/prompts";
+import chalk6 from "chalk";
+import { spawn } from "child_process";
+init_api();
+init_env();
+async function runCommand(projectArg, envArg, commandArgs, _opts) {
+  if (commandArgs.length === 0) {
+    p6.log.error(
+      `No command specified.
+  Usage: ${chalk6.cyan("vaultsy run <project> <env> -- <command> [args...]")}
+  Example: ${chalk6.dim("vaultsy run my-app production -- node server.js")}`
+    );
+    process.exit(1);
+  }
+  p6.intro(chalk6.bold.cyan("vaultsy run"));
+  let projectId;
+  let projectTitle;
+  if (projectArg) {
+    projectId = projectArg;
+  } else {
+    const found = findProjectConfig();
+    if (found) {
+      projectId = found.config.project;
+      p6.log.info(`Using project ${chalk6.cyan(projectId)} from ${chalk6.dim("vaultsy.json")}`);
+    } else {
+      const spinner8 = p6.spinner();
+      spinner8.start("Fetching projects\u2026");
+      let projects;
+      try {
+        projects = await listProjects();
+        spinner8.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+      } catch (err) {
+        spinner8.stop("Failed to fetch projects.");
+        printApiError5(err);
+        process.exit(1);
+      }
+      if (projects.length === 0) {
+        p6.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+        process.exit(1);
+      }
+      const selected = await p6.select({
+        message: "Select a project",
+        options: projects.map((proj) => ({
+          value: proj.id,
+          label: proj.title,
+          hint: proj.id
+        }))
+      });
+      if (p6.isCancel(selected)) {
+        p6.cancel("Run cancelled.");
+        process.exit(0);
+      }
+      projectId = selected;
+      projectTitle = projects.find((proj) => proj.id === selected)?.title;
+    }
+  }
+  let env;
+  if (envArg) {
+    if (!EnvironmentType.includes(envArg)) {
+      p6.log.error(
+        `Invalid environment "${envArg}". Must be one of: ${EnvironmentType.join(", ")}.`
+      );
+      process.exit(1);
+    }
+    env = envArg;
+  } else {
+    const found = findProjectConfig();
+    const defaultEnv = found?.config.defaultEnv;
+    const selected = await p6.select({
+      message: "Select an environment",
+      options: EnvironmentType.map((e) => ({
+        value: e,
+        label: e,
+        hint: e === defaultEnv ? "default" : void 0
+      })),
+      initialValue: defaultEnv ?? "development"
+    });
+    if (p6.isCancel(selected)) {
+      p6.cancel("Run cancelled.");
+      process.exit(0);
+    }
+    env = selected;
+  }
+  const spinner7 = p6.spinner();
+  spinner7.start(`Pulling ${chalk6.cyan(env)} secrets\u2026`);
+  let secrets;
+  try {
+    const result = await pullSecrets(projectId, env);
+    secrets = result.secrets;
+    projectTitle ??= result.project.title;
+    spinner7.stop(
+      `Injecting ${secrets.length} secret${secrets.length !== 1 ? "s" : ""} from ${chalk6.bold(projectTitle)} / ${chalk6.cyan(env)}.`
+    );
+  } catch (err) {
+    spinner7.stop("Failed to pull secrets.");
+    printApiError5(err);
+    process.exit(1);
+  }
+  const injectedEnv = {
+    ...secretsToRecord(secrets),
+    // lower precedence
+    ...filterStringRecord(process.env)
+    // shell env wins
+  };
+  if (secrets.length > 0) {
+    const keyList = secrets.map((s) => chalk6.dim(s.key)).join(", ");
+    p6.log.info(`Injecting: ${keyList}`);
+  } else {
+    p6.log.warn("No secrets found \u2014 running with current environment only.");
+  }
+  const [bin, ...args] = commandArgs;
+  p6.log.step(`${chalk6.bold("$")} ${chalk6.white([bin, ...args].join(" "))}`);
+  process.stdout.write("");
+  const child = spawn(bin, args, {
+    env: injectedEnv,
+    stdio: "inherit",
+    // child shares stdin/stdout/stderr with us
+    shell: false
+    // do NOT use shell — avoids leaking env in ps output
+  });
+  const forwardSignal = (signal) => {
+    if (!child.killed) {
+      child.kill(signal);
+    }
+  };
+  process.on("SIGINT", () => forwardSignal("SIGINT"));
+  process.on("SIGTERM", () => forwardSignal("SIGTERM"));
+  process.on("SIGHUP", () => forwardSignal("SIGHUP"));
+  child.on("error", (err) => {
+    if (err.code === "ENOENT") {
+      p6.log.error(
+        `Command not found: ${chalk6.bold(bin)}
+  Make sure it is installed and available in your PATH.`
+      );
+    } else {
+      p6.log.error(`Failed to start process: ${err.message}`);
+    }
+    process.exit(1);
+  });
+  child.on("close", (code, signal) => {
+    if (signal) {
+      const sigNum = signalToNumber(signal);
+      process.exit(128 + sigNum);
+    }
+    const exitCode = code ?? 1;
+    if (exitCode !== 0) {
+      p6.log.warn(`Process exited with code ${chalk6.bold(String(exitCode))}.`);
+    }
+    process.exit(exitCode);
+  });
+}
+function secretsToRecord(secrets) {
+  const record = {};
+  for (const { key, value } of secrets) {
+    record[key] = value;
+  }
+  return record;
+}
+function filterStringRecord(env) {
+  const out = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== void 0) out[key] = value;
+  }
+  return out;
+}
+function signalToNumber(signal) {
+  const map = {
+    SIGHUP: 1,
+    SIGINT: 2,
+    SIGQUIT: 3,
+    SIGKILL: 9,
+    SIGTERM: 15,
+    SIGSTOP: 19
+  };
+  return map[signal] ?? 0;
+}
+function printApiError5(err) {
+  if (err instanceof ApiError) {
+    if (err.status === 401) {
+      p6.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
+    } else if (err.status === 404) {
+      p6.log.error("Project or environment not found. Check the project ID and environment name.");
+    } else {
+      p6.log.error(`API error ${err.status}: ${err.message}`);
+    }
+  } else if (err instanceof Error) {
+    p6.log.error(err.message);
+  } else {
+    p6.log.error("An unexpected error occurred.");
+  }
+}
+
+// src/index.ts
+var program = new Command();
+program.name("vaultsy").description("Official CLI for Vaultsy \u2014 manage secrets from your terminal").version("0.1.0");
+program.command("login").description("Authenticate with your Vaultsy instance and save credentials locally").option("-t, --token <token>", "API token (skip the interactive prompt)").option(
+  "-u, --base-url <url>",
+  "Base URL of your Vaultsy instance (default: https://vaultsy.app)"
+).action(async (opts) => {
+  await loginCommand(opts);
+});
+program.command("logout").description("Remove locally stored credentials (~/.vaultsy/config.json)").action(async () => {
+  const { clearConfig: clearConfig2, configExists: configExists2 } = await Promise.resolve().then(() => (init_config(), config_exports));
+  const p7 = await import("@clack/prompts");
+  const chalk7 = (await import("chalk")).default;
+  if (!configExists2()) {
+    p7.log.warn("No credentials found \u2014 already logged out.");
+    return;
+  }
+  clearConfig2();
+  p7.log.success(chalk7.green("\u2713") + " Logged out. Credentials removed.");
+});
+program.command("pull [project] [env]").description("Pull secrets from Vaultsy and write them to a local .env file").option("-o, --output <file>", "Output file path (default: .env or .env.<env>)").option("-y, --yes", "Skip confirmation prompts").action(
+  async (project, env, opts) => {
     await pullCommand(project, env, opts);
-});
-// ── push ─────────────────────────────────────────────────────────────────────
-program
-    .command('push [project] [env]')
-    .description('Push secrets from a local .env file up to Vaultsy')
-    .option('-i, --input <file>', 'Input file path (default: .env or .env.<env>)')
-    .option('-y, --yes', 'Skip the diff confirmation prompt')
-    .action(async (project, env, opts) => {
+  }
+);
+program.command("push [project] [env]").description("Push secrets from a local .env file up to Vaultsy").option("-i, --input <file>", "Input file path (default: .env or .env.<env>)").option("-y, --yes", "Skip the diff confirmation prompt").action(
+  async (project, env, opts) => {
     await pushCommand(project, env, opts);
+  }
+);
+program.command("history [project] [env]").description("List version snapshots for an environment").action(async (project, env) => {
+  await historyCommand(project, env);
 });
-// ── history ───────────────────────────────────────────────────────────────────
-program
-    .command('history [project] [env]')
-    .description('List version snapshots for an environment')
-    .action(async (project, env) => {
-    await historyCommand(project, env);
-});
-// ── rollback ──────────────────────────────────────────────────────────────────
-program
-    .command('rollback [project] [env] [versionId]')
-    .description('Roll an environment back to a previous version snapshot')
-    .option('-y, --yes', 'Skip the confirmation prompt')
-    .action(async (project, env, versionId, opts) => {
+program.command("rollback [project] [env] [versionId]").description("Roll an environment back to a previous version snapshot").option("-y, --yes", "Skip the confirmation prompt").action(
+  async (project, env, versionId, opts) => {
     await rollbackCommand(project, env, versionId, opts);
-});
-// ── run ───────────────────────────────────────────────────────────────────────
-program
-    .command('run [project] [env]')
-    .description('Pull secrets and inject them as env vars into a subprocess — secrets never touch disk')
-    .allowUnknownOption()
-    .helpOption('-H, --help', 'Display help for the run command')
-    .action(async (project, env, _opts, cmd) => {
-    // Everything after `--` is the child command
+  }
+);
+program.command("run [project] [env]").description(
+  "Pull secrets and inject them as env vars into a subprocess \u2014 secrets never touch disk"
+).allowUnknownOption().helpOption("-H, --help", "Display help for the run command").action(
+  async (project, env, _opts, cmd) => {
     const rawArgs = cmd.parent?.args ?? [];
-    const separatorIndex = rawArgs.indexOf('--');
+    const separatorIndex = rawArgs.indexOf("--");
     const commandArgs = separatorIndex !== -1 ? rawArgs.slice(separatorIndex + 1) : [];
     await runCommand(project, env, commandArgs, {});
+  }
+);
+program.command("init").description(
+  "Create a vaultsy.json in the current directory to pin a project and default environment"
+).action(async () => {
+  const p7 = await import("@clack/prompts");
+  const chalk7 = (await import("chalk")).default;
+  const { listProjects: listProjects2 } = await Promise.resolve().then(() => (init_api(), api_exports));
+  const { writeProjectConfig: writeProjectConfig2, findProjectConfig: findProjectConfig2 } = await Promise.resolve().then(() => (init_env(), env_exports));
+  p7.intro(chalk7.bold.cyan("vaultsy init"));
+  const existing = findProjectConfig2();
+  if (existing) {
+    p7.log.warn(
+      `A ${chalk7.bold("vaultsy.json")} already exists at ${chalk7.dim(existing.dir)}.
+  Delete it first if you want to re-initialise.`
+    );
+    process.exit(0);
+  }
+  const spinner7 = p7.spinner();
+  spinner7.start("Fetching your projects\u2026");
+  let projects;
+  try {
+    projects = await listProjects2();
+    spinner7.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+  } catch (err) {
+    spinner7.stop("Failed to fetch projects.");
+    if (err instanceof Error) p7.log.error(err.message);
+    process.exit(1);
+  }
+  if (projects.length === 0) {
+    p7.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+    process.exit(1);
+  }
+  const selectedProject = await p7.select({
+    message: "Which project does this directory belong to?",
+    options: projects.map((proj) => ({
+      value: proj.id,
+      label: proj.title,
+      hint: proj.id
+    }))
+  });
+  if (p7.isCancel(selectedProject)) {
+    p7.cancel("Init cancelled.");
+    process.exit(0);
+  }
+  const selectedEnv = await p7.select({
+    message: "Default environment for this directory?",
+    options: EnvironmentType.map((e) => ({ value: e, label: e })),
+    initialValue: "development"
+  });
+  if (p7.isCancel(selectedEnv)) {
+    p7.cancel("Init cancelled.");
+    process.exit(0);
+  }
+  writeProjectConfig2({ project: selectedProject, defaultEnv: selectedEnv });
+  p7.outro(
+    `${chalk7.green("\u2713")} Created ${chalk7.bold("vaultsy.json")}
+  Run ${chalk7.cyan("vaultsy pull")} or ${chalk7.cyan("vaultsy push")} with no arguments from this directory.`
+  );
 });
-// ── init ─────────────────────────────────────────────────────────────────────
-program
-    .command('init')
-    .description('Create a vaultsy.json in the current directory to pin a project and default environment')
-    .action(async () => {
-    const p = await import('@clack/prompts');
-    const chalk = (await import('chalk')).default;
-    const { listProjects } = await import('./lib/api.js');
-    const { writeProjectConfig, findProjectConfig } = await import('./lib/env.js');
-    p.intro(chalk.bold.cyan('vaultsy init'));
-    const existing = findProjectConfig();
-    if (existing) {
-        p.log.warn(`A ${chalk.bold('vaultsy.json')} already exists at ${chalk.dim(existing.dir)}.\n` +
-            `  Delete it first if you want to re-initialise.`);
-        process.exit(0);
+program.command("whoami").description("Show the currently authenticated user").action(async () => {
+  const p7 = await import("@clack/prompts");
+  const chalk7 = (await import("chalk")).default;
+  const { getMe: getMe2 } = await Promise.resolve().then(() => (init_api(), api_exports));
+  try {
+    const me = await getMe2();
+    p7.log.success(`Logged in as ${chalk7.bold(me.name)} ${chalk7.dim(`<${me.email}>`)}`);
+  } catch (err) {
+    if (err instanceof Error) {
+      p7.log.error(err.message);
+    } else {
+      p7.log.error("Not authenticated. Run `vaultsy login` first.");
     }
-    const spinner = p.spinner();
-    spinner.start('Fetching your projects…');
-    let projects;
-    try {
-        projects = await listProjects();
-        spinner.stop(`Found ${projects.length} project${projects.length !== 1 ? 's' : ''}.`);
-    }
-    catch (err) {
-        spinner.stop('Failed to fetch projects.');
-        if (err instanceof Error)
-            p.log.error(err.message);
-        process.exit(1);
-    }
-    if (projects.length === 0) {
-        p.log.error('No projects found. Create one at your Vaultsy dashboard first.');
-        process.exit(1);
-    }
-    const selectedProject = await p.select({
-        message: 'Which project does this directory belong to?',
-        options: projects.map((proj) => ({
-            value: proj.id,
-            label: proj.title,
-            hint: proj.id
-        }))
-    });
-    if (p.isCancel(selectedProject)) {
-        p.cancel('Init cancelled.');
-        process.exit(0);
-    }
-    const selectedEnv = await p.select({
-        message: 'Default environment for this directory?',
-        options: EnvironmentType.map((e) => ({ value: e, label: e })),
-        initialValue: 'development'
-    });
-    if (p.isCancel(selectedEnv)) {
-        p.cancel('Init cancelled.');
-        process.exit(0);
-    }
-    writeProjectConfig({ project: selectedProject, defaultEnv: selectedEnv });
-    p.outro(`${chalk.green('✓')} Created ${chalk.bold('vaultsy.json')}\n` +
-        `  Run ${chalk.cyan('vaultsy pull')} or ${chalk.cyan('vaultsy push')} with no arguments from this directory.`);
-});
-// ── whoami ────────────────────────────────────────────────────────────────────
-program
-    .command('whoami')
-    .description('Show the currently authenticated user')
-    .action(async () => {
-    const p = await import('@clack/prompts');
-    const chalk = (await import('chalk')).default;
-    const { getMe } = await import('./lib/api.js');
-    try {
-        const me = await getMe();
-        p.log.success(`Logged in as ${chalk.bold(me.name)} ${chalk.dim(`<${me.email}>`)}`);
-    }
-    catch (err) {
-        if (err instanceof Error) {
-            p.log.error(err.message);
-        }
-        else {
-            p.log.error('Not authenticated. Run `vaultsy login` first.');
-        }
-        process.exit(1);
-    }
+    process.exit(1);
+  }
 });
 program.parseAsync(process.argv).catch((err) => {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error(`\n  ${message}\n`);
-    process.exit(1);
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(`
+  ${message}
+`);
+  process.exit(1);
 });
-//# sourceMappingURL=index.js.map

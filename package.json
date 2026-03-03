@@ -20,8 +20,8 @@
 		"db:migrate": "drizzle-kit migrate",
 		"db:studio": "drizzle-kit studio",
 		"auth:schema": "npx @better-auth/cli generate --config src/lib/server/auth.ts --output src/lib/server/db/auth.schema.ts --yes",
-		"cli:build": "cd packages/shared && npx tsc && cd ../cli && npx tsc",
-		"cli:dev": "cd packages/shared && npx tsc && cd ../cli && npx tsc --watch",
+		"cli:build": "cd packages/shared && npx tsc && cd ../cli && npx tsup",
+		"cli:dev": "cd packages/shared && npx tsc && cd ../cli && npx tsup --watch",
 		"cli:run": "node packages/cli/dist/index.js"
 	},
 	"devDependencies": {
