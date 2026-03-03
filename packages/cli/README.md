@@ -1,6 +1,10 @@
 # vaultsy-cli
 
-Official CLI for [Vaultsy](https://vaultsy.app) — pull, push, and inject secrets from your terminal without secrets ever living outside your encrypted store.
+Official CLI for [Vaultsy](https://vaultsy.vercel.app) — pull, push, and inject secrets from your terminal without secrets ever living outside your encrypted store.
+
+[![npm version](https://img.shields.io/npm/v/vaultsy-cli)](https://www.npmjs.com/package/vaultsy-cli)
+[![npm downloads](https://img.shields.io/npm/dm/vaultsy-cli)](https://www.npmjs.com/package/vaultsy-cli)
+[![license](https://img.shields.io/npm/l/vaultsy-cli)](./LICENSE)
 
 ---
 
@@ -17,7 +21,7 @@ bun add -g vaultsy-cli
 ## Quick Start
 
 ```sh
-# 1. Authenticate
+# 1. Authenticate (opens a token prompt — no URL needed)
 vaultsy login
 
 # 2. Pin a project to the current directory (optional but recommended)
@@ -37,29 +41,29 @@ vaultsy run -- node server.js
 
 ## Authentication
 
-Vaultsy uses API tokens. Tokens are created in the web dashboard under **Settings → API Tokens**.
+Vaultsy uses API tokens. Create one at [vaultsy.vercel.app/dashboard/settings](https://vaultsy.vercel.app/dashboard/settings).
 
 ```sh
 vaultsy login
 ```
 
-You will be prompted for:
-- Your Vaultsy base URL (default: `https://vaultsy.app`)
-- Your API token (paste it from the dashboard)
-
-The token is verified against the server and saved to `~/.vaultsy/config.json` with `600` permissions (owner read/write only).
+The CLI will:
+1. Show you a link to create a token at the dashboard
+2. Ask you to paste the token
+3. Verify it against the server
+4. Save it to `~/.vaultsy/config.json` with `600` permissions (owner read/write only)
 
 ### Options
 
 | Flag | Description |
 |---|---|
 | `-t, --token <token>` | Provide the token directly (skips the interactive prompt) |
-| `-u, --base-url <url>` | Base URL of your Vaultsy instance |
+| `-u, --base-url <url>` | Override the base URL (for self-hosted instances) |
 
 ### Non-interactive / CI usage
 
 ```sh
-vaultsy login --token "$VAULTSY_TOKEN" --base-url https://vaultsy.app
+vaultsy login --token "$VAULTSY_TOKEN"
 ```
 
 ---
@@ -72,7 +76,10 @@ Authenticate and save credentials to `~/.vaultsy/config.json`.
 
 ```sh
 vaultsy login
-vaultsy login --token <token> --base-url https://vaultsy.app
+vaultsy login --token <token>
+
+# Self-hosted instance
+vaultsy login --token <token> --base-url https://my-vaultsy.example.com
 ```
 
 ---
@@ -93,14 +100,14 @@ Show the currently authenticated user.
 
 ```sh
 vaultsy whoami
-# → Logged in as John Doe <john@example.com>
+# ✓ Logged in as John Doe <john@example.com>
 ```
 
 ---
 
 ### `vaultsy init`
 
-Create a `vaultsy.json` in the current directory. This pins a project ID and a default environment so you can run `vaultsy pull` / `vaultsy push` with no arguments.
+Create a `vaultsy.json` in the current directory. Pins a project ID and default environment so every other command works with no arguments.
 
 ```sh
 vaultsy init
@@ -115,7 +122,55 @@ Creates `vaultsy.json`:
 }
 ```
 
-Commit this file — it contains only a project ID, never any secret values.
+The CLI walks up the directory tree to find `vaultsy.json`, the same way `git` finds `.git`. Commit this file safely — it contains only a project ID, never any secret values.
+
+---
+
+### `vaultsy envs [project]`
+
+Show all secrets for a project across all four environments at once. Values are hidden by default.
+
+```sh
+# Interactive project picker
+vaultsy envs
+
+# Explicit project
+vaultsy envs <project-id>
+
+# Single environment only
+vaultsy envs --env production
+
+# Reveal secret values
+vaultsy envs --show-values
+vaultsy envs --env staging --show-values
+```
+
+Output example:
+
+```
+  ● DEVELOPMENT
+  ────────────────────────────────────────────────────────────
+  KEY                  VALUE
+  ·······································
+  DATABASE_URL         ●●●●●●●●●●●●
+  NEXT_PUBLIC_URL      ●●●●●●●●●●●●
+  2 secrets
+
+  ● STAGING
+  ────────────────────────────────────────────────────────────
+  KEY                  VALUE
+  ·······································
+  DATABASE_URL         ●●●●●●●●●●●●
+  SECRET_KEY           ●●●●●●●●●●●●
+  2 secrets
+```
+
+#### Options
+
+| Flag | Description |
+|---|---|
+| `-e, --env <env>` | Show only one environment (`development`, `staging`, `preview`, `production`) |
+| `-s, --show-values` | Reveal secret values in the output |
 
 ---
 
@@ -127,7 +182,7 @@ Pull all secrets for an environment and write them to a local `.env` file.
 # Interactive — picks project and env from a list
 vaultsy pull
 
-# With vaultsy.json in the current directory
+# With vaultsy.json in the current directory (no args needed)
 vaultsy pull
 
 # Explicit
@@ -138,10 +193,13 @@ vaultsy pull <project-id> production --output .env.local
 ```
 
 **Default output file:**
-- `development` → `.env`
-- `staging` → `.env.staging`
-- `preview` → `.env.preview`
-- `production` → `.env.production`
+
+| Environment | File |
+|---|---|
+| `development` | `.env` |
+| `staging` | `.env.staging` |
+| `preview` | `.env.preview` |
+| `production` | `.env.production` |
 
 The CLI warns you if the output file is not in `.gitignore`.
 
@@ -168,7 +226,7 @@ vaultsy push <project-id> production
 # Push from a custom file
 vaultsy push <project-id> production --input .env.local
 
-# Skip the confirmation prompt
+# Skip the confirmation prompt (useful in CI)
 vaultsy push <project-id> production --yes
 ```
 
@@ -259,7 +317,8 @@ vaultsy run -- node server.js
 **Precedence:** variables already set in your shell take priority over secrets from Vaultsy. This lets you override a single variable locally without editing the remote store:
 
 ```sh
-PORT=4000 vaultsy run -- node server.js   # PORT=4000 wins; all other secrets come from Vaultsy
+# PORT comes from your shell; everything else comes from Vaultsy
+PORT=4000 vaultsy run -- node server.js
 ```
 
 The child process shares `stdin`, `stdout`, and `stderr` with the CLI. Signals (`SIGINT`, `SIGTERM`, `SIGHUP`) are forwarded to the child, so `Ctrl+C` works as expected.
@@ -268,7 +327,7 @@ The child process shares `stdin`, `stdout`, and `stderr` with the CLI. Signals (
 
 ## Project Config (`vaultsy.json`)
 
-Placing a `vaultsy.json` in your project root lets you run all commands without specifying a project ID or environment every time.
+Placing a `vaultsy.json` in your project root means you never have to pass `<project-id>` or `<env>` as arguments.
 
 ```json
 {
@@ -280,59 +339,71 @@ Placing a `vaultsy.json` in your project root lets you run all commands without 
 | Field | Required | Description |
 |---|---|---|
 | `project` | Yes | The project ID from your Vaultsy dashboard |
-| `defaultEnv` | No | Default environment used when no `[env]` argument is given |
-
-The CLI walks up the directory tree to find `vaultsy.json`, the same way `git` finds `.git`. You can commit this file safely — it contains no secrets.
+| `defaultEnv` | No | Default environment when no `[env]` argument is given |
 
 ---
 
 ## CI/CD Usage
 
-### GitHub Actions
+### GitHub Actions — pull secrets before build
 
 ```yaml
 - name: Pull secrets
   env:
     VAULTSY_TOKEN: ${{ secrets.VAULTSY_TOKEN }}
   run: |
-    npx vaultsy-cli login --token "$VAULTSY_TOKEN" --base-url https://vaultsy.app
-    npx vaultsy-cli pull my-project production --output .env --yes
+    npx vaultsy-cli login --token "$VAULTSY_TOKEN"
+    npx vaultsy-cli pull <project-id> production --output .env --yes
 ```
 
-### Inject secrets directly into a step
+### GitHub Actions — inject secrets into a command
 
 ```yaml
-- name: Start server with secrets injected
+- name: Run with secrets injected
   env:
     VAULTSY_TOKEN: ${{ secrets.VAULTSY_TOKEN }}
   run: |
     npx vaultsy-cli login --token "$VAULTSY_TOKEN"
-    npx vaultsy-cli run my-project production -- node server.js
+    npx vaultsy-cli run <project-id> production -- node server.js
 ```
+
+> Store your Vaultsy API token as a GitHub Actions secret (`VAULTSY_TOKEN`) in your repository settings under **Settings → Secrets and variables → Actions**.
 
 ---
 
 ## Security
 
-- The API token is stored in `~/.vaultsy/config.json` with `0600` permissions — never readable by other users.
-- Secret **values** are never printed to stdout unless the web dashboard is used directly.
-- The `run` command uses `shell: false` when spawning the child process to prevent secrets from appearing in `ps` output.
-- The `pull` command warns if the output `.env` file is not in `.gitignore`.
-- HTTPS is enforced by default. Use `--base-url http://...` only for local development.
+- The API token is stored in `~/.vaultsy/config.json` with `0600` permissions — never readable by other users on the machine.
+- Secret **values** are never printed to stdout unless you explicitly pass `--show-values`.
+- The `run` command uses `shell: false` when spawning the child process to prevent secrets appearing in `ps` output.
+- The `pull` command warns if the output `.env` file is not listed in `.gitignore`.
+- All communication with the server uses HTTPS. Use `--base-url http://...` only for local development.
 
 ---
 
 ## Environments
 
-| Name | Description |
-|---|---|
-| `development` | Local development (default, maps to `.env`) |
-| `staging` | Staging / QA environment |
-| `preview` | Preview / PR deployments |
-| `production` | Production environment |
+| Name | Description | Default file |
+|---|---|---|
+| `development` | Local development | `.env` |
+| `staging` | Staging / QA | `.env.staging` |
+| `preview` | Preview / PR deployments | `.env.preview` |
+| `production` | Production | `.env.production` |
+
+---
+
+## Self-Hosting
+
+If you run your own instance of Vaultsy, pass `--base-url` when logging in:
+
+```sh
+vaultsy login --base-url https://my-vaultsy.example.com
+```
+
+The base URL is saved to `~/.vaultsy/config.json` and used for all subsequent commands automatically.
 
 ---
 
 ## License
 
-MIT
+MIT © [Ayush Kumar](https://github.com/Ayushkumar48)

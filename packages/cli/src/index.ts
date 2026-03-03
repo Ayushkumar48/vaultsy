@@ -1,4 +1,5 @@
 import { Command } from 'commander';
+import { envsCommand } from './commands/envs.js';
 import { EnvironmentType } from '@vaultsy/shared';
 import type { Environment } from '@vaultsy/shared';
 import { loginCommand } from './commands/login.js';
@@ -77,6 +78,19 @@ program
 			await pushCommand(project, env, opts);
 		}
 	);
+
+// ── envs ──────────────────────────────────────────────────────────────────────
+program
+	.command('envs [project]')
+	.description('Show secrets for a project across all environments (values hidden by default)')
+	.option(
+		'-e, --env <env>',
+		'Show only a specific environment (development, staging, preview, production)'
+	)
+	.option('-s, --show-values', 'Reveal secret values in the output')
+	.action(async (project: string | undefined, opts: { env?: string; showValues?: boolean }) => {
+		await envsCommand(project, opts);
+	});
 
 // ── history ───────────────────────────────────────────────────────────────────
 program

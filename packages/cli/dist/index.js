@@ -259,72 +259,30 @@ var init_env = __esm({
 // src/index.ts
 import { Command } from "commander";
 
+// src/commands/envs.ts
+import * as p from "@clack/prompts";
+import chalk from "chalk";
+
 // ../shared/dist/enums.js
 var EnvironmentType = ["development", "staging", "preview", "production"];
 
-// src/commands/login.ts
-init_config();
-init_api();
-import * as p from "@clack/prompts";
-import chalk from "chalk";
-var DEFAULT_BASE_URL = "https://vaultsy.vercel.app";
-async function loginCommand(opts) {
-  p.intro(chalk.bold.cyan("vaultsy login"));
-  const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
-  let token;
-  if (opts.token) {
-    token = opts.token;
-  } else {
-    p.log.info(`Create a token at ${chalk.cyan(baseUrl + "/dashboard/settings")}`);
-    const input = await p.password({
-      message: "Paste your API token",
-      validate(value) {
-        if (!value.trim()) return "Token is required.";
-      }
-    });
-    if (p.isCancel(input)) {
-      p.cancel("Login cancelled.");
-      process.exit(0);
-    }
-    token = input.trim();
-  }
-  const spinner7 = p.spinner();
-  spinner7.start("Verifying token\u2026");
-  let userName;
-  let userEmail;
-  try {
-    const me = await getMe({ baseUrl, token });
-    userName = me.name;
-    userEmail = me.email;
-    spinner7.stop("Token verified.");
-  } catch (err) {
-    spinner7.stop("Verification failed.");
-    if (err instanceof ApiError) {
-      if (err.status === 401) {
-        p.log.error("Invalid or expired token. Generate a new one and try again.");
-      } else {
-        p.log.error(`Server responded with ${err.status}: ${err.message}`);
-      }
-    } else {
-      p.log.error(`Could not reach ${baseUrl}. Check your network connection.`);
-    }
-    process.exit(1);
-  }
-  writeConfig({ token, baseUrl });
-  p.outro(
-    `${chalk.green("\u2713")} Logged in as ${chalk.bold(userName)} ${chalk.dim(`<${userEmail}>`)}
-  Config saved to ${chalk.dim("~/.vaultsy/config.json")}`
-  );
-}
-
-// src/commands/pull.ts
-import * as p2 from "@clack/prompts";
-import chalk2 from "chalk";
-import { resolve as resolve2 } from "path";
+// src/commands/envs.ts
 init_api();
 init_env();
-async function pullCommand(projectArg, envArg, opts) {
-  p2.intro(chalk2.bold.cyan("vaultsy pull"));
+async function envsCommand(projectArg, opts) {
+  p.intro(chalk.bold.cyan("vaultsy envs"));
+  let envsToShow;
+  if (opts.env) {
+    if (!EnvironmentType.includes(opts.env)) {
+      p.log.error(
+        `Invalid environment "${opts.env}". Must be one of: ${EnvironmentType.join(", ")}.`
+      );
+      process.exit(1);
+    }
+    envsToShow = [opts.env];
+  } else {
+    envsToShow = [...EnvironmentType];
+  }
   let projectId;
   let projectTitle;
   if (projectArg) {
@@ -333,24 +291,24 @@ async function pullCommand(projectArg, envArg, opts) {
     const found = findProjectConfig();
     if (found) {
       projectId = found.config.project;
-      p2.log.info(`Using project ${chalk2.cyan(projectId)} from ${chalk2.dim("vaultsy.json")}`);
+      p.log.info(`Using project ${chalk.cyan(projectId)} from ${chalk.dim("vaultsy.json")}`);
     } else {
-      const spinner8 = p2.spinner();
-      spinner8.start("Fetching projects\u2026");
+      const spinner9 = p.spinner();
+      spinner9.start("Fetching projects\u2026");
       let projects;
       try {
         projects = await listProjects();
-        spinner8.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+        spinner9.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
       } catch (err) {
-        spinner8.stop("Failed to fetch projects.");
+        spinner9.stop("Failed to fetch projects.");
         printApiError(err);
         process.exit(1);
       }
       if (projects.length === 0) {
-        p2.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+        p.log.error("No projects found. Create one at your Vaultsy dashboard first.");
         process.exit(1);
       }
-      const selected = await p2.select({
+      const selected = await p.select({
         message: "Select a project",
         options: projects.map((proj) => ({
           value: proj.id,
@@ -358,106 +316,183 @@ async function pullCommand(projectArg, envArg, opts) {
           hint: proj.id
         }))
       });
-      if (p2.isCancel(selected)) {
-        p2.cancel("Pull cancelled.");
+      if (p.isCancel(selected)) {
+        p.cancel("Cancelled.");
         process.exit(0);
       }
       projectId = selected;
       projectTitle = projects.find((proj) => proj.id === selected)?.title;
     }
   }
-  let env;
-  if (envArg) {
-    if (!EnvironmentType.includes(envArg)) {
-      p2.log.error(
-        `Invalid environment "${envArg}". Must be one of: ${EnvironmentType.join(", ")}.`
-      );
-      process.exit(1);
-    }
-    env = envArg;
-  } else {
-    const found = findProjectConfig();
-    const defaultEnv = found?.config.defaultEnv;
-    const selected = await p2.select({
-      message: "Select an environment",
-      options: EnvironmentType.map((e) => ({
-        value: e,
-        label: e,
-        hint: e === defaultEnv ? "default" : void 0
-      })),
-      initialValue: defaultEnv ?? "development"
-    });
-    if (p2.isCancel(selected)) {
-      p2.cancel("Pull cancelled.");
-      process.exit(0);
-    }
-    env = selected;
-  }
-  const filename = opts.output ?? envFileName(env);
-  const outputPath = resolve2(process.cwd(), filename);
-  if (!opts.yes && !isGitIgnored(filename)) {
-    p2.log.warn(
-      `${chalk2.yellow(filename)} does not appear to be in ${chalk2.dim(".gitignore")}.
-  Make sure you don't accidentally commit secrets to version control.`
-    );
-    const confirmed = await p2.confirm({
-      message: "Continue anyway?",
-      initialValue: false
-    });
-    if (p2.isCancel(confirmed) || !confirmed) {
-      p2.cancel("Pull cancelled.");
-      process.exit(0);
-    }
-  }
-  const spinner7 = p2.spinner();
-  spinner7.start(`Pulling ${chalk2.cyan(env)} secrets\u2026`);
-  let result;
+  const spinner8 = p.spinner();
+  spinner8.start(
+    `Fetching ${envsToShow.length === 1 ? envsToShow[0] : "all"} environment${envsToShow.length !== 1 ? "s" : ""}\u2026`
+  );
+  let results;
   try {
-    result = await pullSecrets(projectId, env);
-    spinner7.stop(
-      `Pulled ${result.secrets.length} secret${result.secrets.length !== 1 ? "s" : ""} from ${chalk2.bold(projectTitle ?? result.project.title)} / ${chalk2.cyan(env)}.`
+    results = await Promise.all(
+      envsToShow.map(async (env) => {
+        try {
+          const res = await pullSecrets(projectId, env);
+          if (!projectTitle) projectTitle = res.project.title;
+          return { env, secrets: res.secrets, error: null };
+        } catch (err) {
+          const message = err instanceof ApiError ? `${err.status}: ${err.message}` : "Unknown error";
+          return { env, secrets: null, error: message };
+        }
+      })
     );
+    spinner8.stop(`Loaded secrets for ${chalk.bold(projectTitle ?? projectId)}.`);
   } catch (err) {
-    spinner7.stop("Pull failed.");
+    spinner8.stop("Failed to fetch secrets.");
     printApiError(err);
     process.exit(1);
   }
-  if (result.secrets.length === 0) {
-    p2.log.warn(`No secrets found for the ${chalk2.cyan(env)} environment.`);
-    p2.outro(chalk2.dim("Nothing written."));
+  const totalSecrets = results.reduce((sum, r) => sum + (r.secrets?.length ?? 0), 0);
+  if (totalSecrets === 0 && results.every((r) => r.error === null)) {
+    p.log.warn("No secrets found across any environment.");
+    p.outro(chalk.dim("Nothing to show."));
     return;
   }
-  writeEnvFile(outputPath, result.secrets);
-  p2.outro(
-    `${chalk2.green("\u2713")} Written to ${chalk2.bold(filename)}
-  ${chalk2.dim(outputPath)}`
+  const lines = [];
+  for (const result of results) {
+    const envLabel = envBadge(result.env);
+    lines.push("");
+    lines.push(envLabel);
+    lines.push(chalk.dim("\u2500".repeat(60)));
+    if (result.error !== null) {
+      lines.push(`  ${chalk.red("\u2717")} Failed to load: ${chalk.dim(result.error)}`);
+      continue;
+    }
+    if (result.secrets === null || result.secrets.length === 0) {
+      lines.push(`  ${chalk.dim("No secrets.")}`);
+      continue;
+    }
+    const maxKeyLen = Math.min(Math.max(...result.secrets.map((s) => s.key.length), 3), 40);
+    const maxValLen = opts.showValues ? Math.min(Math.max(...result.secrets.map((s) => s.value.length), 5), 60) : 16;
+    const colHeader = "  " + chalk.bold(padEnd("KEY", maxKeyLen)) + chalk.dim("   ") + chalk.bold(padEnd(opts.showValues ? "VALUE" : "VALUE", maxValLen));
+    lines.push(colHeader);
+    lines.push("  " + chalk.dim("\xB7".repeat(maxKeyLen + maxValLen + 3)));
+    for (const secret of result.secrets) {
+      const key = chalk.cyan(padEnd(truncate(secret.key, 40), maxKeyLen));
+      let value;
+      if (opts.showValues) {
+        value = chalk.white(truncate(secret.value, 60));
+      } else {
+        value = chalk.dim("\u25CF".repeat(Math.min(secret.value.length, 12)) || "(empty)");
+      }
+      lines.push(`  ${key}   ${value}`);
+    }
+    lines.push(
+      "  " + chalk.dim(`${result.secrets.length} secret${result.secrets.length !== 1 ? "s" : ""}`)
+    );
+  }
+  p.log.message(lines.join("\n"));
+  if (!opts.showValues) {
+    p.log.info(`Values are hidden. Run with ${chalk.cyan("--show-values")} to reveal them.`);
+  }
+  p.outro(
+    `${chalk.bold(projectTitle ?? projectId)} \u2014 ${totalSecrets} secret${totalSecrets !== 1 ? "s" : ""} across ${results.length} environment${results.length !== 1 ? "s" : ""}.`
   );
+}
+var ENV_COLORS = {
+  development: chalk.green,
+  staging: chalk.yellow,
+  preview: chalk.blue,
+  production: chalk.red
+};
+function envBadge(env) {
+  const color = ENV_COLORS[env];
+  return `  ${color("\u25CF")} ${chalk.bold(color(env.toUpperCase()))}`;
+}
+var ANSI_REGEX = new RegExp("\x1B\\[[0-9;]*m", "g");
+function padEnd(str, length) {
+  const visible = str.replace(ANSI_REGEX, "");
+  const pad = Math.max(0, length - visible.length);
+  return str + " ".repeat(pad);
+}
+function truncate(str, max) {
+  return str.length > max ? str.slice(0, max - 1) + "\u2026" : str;
 }
 function printApiError(err) {
   if (err instanceof ApiError) {
     if (err.status === 401) {
-      p2.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
+      p.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
     } else if (err.status === 404) {
-      p2.log.error("Project or environment not found. Check the project ID and environment name.");
+      p.log.error("Project not found. Check the project ID.");
     } else {
-      p2.log.error(`API error ${err.status}: ${err.message}`);
+      p.log.error(`API error ${err.status}: ${err.message}`);
     }
   } else if (err instanceof Error) {
-    p2.log.error(err.message);
+    p.log.error(err.message);
   } else {
-    p2.log.error("An unexpected error occurred.");
+    p.log.error("An unexpected error occurred.");
   }
 }
 
-// src/commands/push.ts
+// src/commands/login.ts
+init_config();
+init_api();
+import * as p2 from "@clack/prompts";
+import chalk2 from "chalk";
+var DEFAULT_BASE_URL = "https://vaultsy.vercel.app";
+async function loginCommand(opts) {
+  p2.intro(chalk2.bold.cyan("vaultsy login"));
+  const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/$/, "");
+  let token;
+  if (opts.token) {
+    token = opts.token;
+  } else {
+    p2.log.info(`Create a token at ${chalk2.cyan(baseUrl + "/dashboard/settings")}`);
+    const input = await p2.password({
+      message: "Paste your API token",
+      validate(value) {
+        if (!value.trim()) return "Token is required.";
+      }
+    });
+    if (p2.isCancel(input)) {
+      p2.cancel("Login cancelled.");
+      process.exit(0);
+    }
+    token = input.trim();
+  }
+  const spinner8 = p2.spinner();
+  spinner8.start("Verifying token\u2026");
+  let userName;
+  let userEmail;
+  try {
+    const me = await getMe({ baseUrl, token });
+    userName = me.name;
+    userEmail = me.email;
+    spinner8.stop("Token verified.");
+  } catch (err) {
+    spinner8.stop("Verification failed.");
+    if (err instanceof ApiError) {
+      if (err.status === 401) {
+        p2.log.error("Invalid or expired token. Generate a new one and try again.");
+      } else {
+        p2.log.error(`Server responded with ${err.status}: ${err.message}`);
+      }
+    } else {
+      p2.log.error(`Could not reach ${baseUrl}. Check your network connection.`);
+    }
+    process.exit(1);
+  }
+  writeConfig({ token, baseUrl });
+  p2.outro(
+    `${chalk2.green("\u2713")} Logged in as ${chalk2.bold(userName)} ${chalk2.dim(`<${userEmail}>`)}
+  Config saved to ${chalk2.dim("~/.vaultsy/config.json")}`
+  );
+}
+
+// src/commands/pull.ts
 import * as p3 from "@clack/prompts";
 import chalk3 from "chalk";
-import { resolve as resolve3 } from "path";
-import { existsSync as existsSync3 } from "fs";
+import { resolve as resolve2 } from "path";
 init_api();
 init_env();
-async function pushCommand(projectArg, envArg, opts) {
-  p3.intro(chalk3.bold.cyan("vaultsy push"));
+async function pullCommand(projectArg, envArg, opts) {
+  p3.intro(chalk3.bold.cyan("vaultsy pull"));
   let projectId;
   let projectTitle;
   if (projectArg) {
@@ -468,14 +503,14 @@ async function pushCommand(projectArg, envArg, opts) {
       projectId = found.config.project;
       p3.log.info(`Using project ${chalk3.cyan(projectId)} from ${chalk3.dim("vaultsy.json")}`);
     } else {
-      const spinner7 = p3.spinner();
-      spinner7.start("Fetching projects\u2026");
+      const spinner9 = p3.spinner();
+      spinner9.start("Fetching projects\u2026");
       let projects;
       try {
         projects = await listProjects();
-        spinner7.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+        spinner9.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
       } catch (err) {
-        spinner7.stop("Failed to fetch projects.");
+        spinner9.stop("Failed to fetch projects.");
         printApiError2(err);
         process.exit(1);
       }
@@ -492,7 +527,7 @@ async function pushCommand(projectArg, envArg, opts) {
         }))
       });
       if (p3.isCancel(selected)) {
-        p3.cancel("Push cancelled.");
+        p3.cancel("Pull cancelled.");
         process.exit(0);
       }
       projectId = selected;
@@ -521,131 +556,50 @@ async function pushCommand(projectArg, envArg, opts) {
       initialValue: defaultEnv ?? "development"
     });
     if (p3.isCancel(selected)) {
-      p3.cancel("Push cancelled.");
+      p3.cancel("Pull cancelled.");
       process.exit(0);
     }
     env = selected;
   }
-  const filename = opts.input ?? envFileName(env);
-  const inputPath = resolve3(process.cwd(), filename);
-  if (!existsSync3(inputPath)) {
-    p3.log.error(
-      `File ${chalk3.bold(filename)} not found.
-  Run ${chalk3.cyan(`vaultsy pull ${projectId} ${env}`)} first, or specify a file with ${chalk3.dim("--input <file>")}.`
+  const filename = opts.output ?? envFileName(env);
+  const outputPath = resolve2(process.cwd(), filename);
+  if (!opts.yes && !isGitIgnored(filename)) {
+    p3.log.warn(
+      `${chalk3.yellow(filename)} does not appear to be in ${chalk3.dim(".gitignore")}.
+  Make sure you don't accidentally commit secrets to version control.`
     );
-    process.exit(1);
-  }
-  const localSecrets = readEnvFile(inputPath).filter((r) => r.key && r.value);
-  if (localSecrets.length === 0) {
-    p3.log.warn(`${chalk3.bold(filename)} is empty or contains no valid KEY=VALUE pairs.`);
-    p3.outro(chalk3.dim("Nothing pushed."));
-    return;
-  }
-  p3.log.info(
-    `Read ${chalk3.bold(String(localSecrets.length))} secret${localSecrets.length !== 1 ? "s" : ""} from ${chalk3.bold(filename)}.`
-  );
-  const diffSpinner = p3.spinner();
-  diffSpinner.start("Computing diff against remote\u2026");
-  let remoteSecrets;
-  let resolvedTitle;
-  try {
-    const remote = await pullSecrets(projectId, env);
-    remoteSecrets = remote.secrets;
-    resolvedTitle = projectTitle ?? remote.project.title;
-    diffSpinner.stop("Diff computed.");
-  } catch (err) {
-    diffSpinner.stop("Failed to fetch remote secrets.");
-    printApiError2(err);
-    process.exit(1);
-  }
-  const diff = computeDiff(remoteSecrets, localSecrets);
-  printDiff(diff);
-  const hasChanges = diff.added.length > 0 || diff.modified.length > 0 || diff.removed.length > 0;
-  if (!hasChanges) {
-    p3.outro(`${chalk3.dim("No changes.")} Remote ${chalk3.cyan(env)} is already up to date.`);
-    return;
-  }
-  if (!opts.yes) {
     const confirmed = await p3.confirm({
-      message: `Push these changes to ${chalk3.bold(resolvedTitle)} / ${chalk3.cyan(env)}?`,
-      initialValue: true
+      message: "Continue anyway?",
+      initialValue: false
     });
     if (p3.isCancel(confirmed) || !confirmed) {
-      p3.cancel("Push cancelled.");
+      p3.cancel("Pull cancelled.");
       process.exit(0);
     }
   }
-  const pushSpinner = p3.spinner();
-  pushSpinner.start(`Pushing to ${chalk3.cyan(env)}\u2026`);
+  const spinner8 = p3.spinner();
+  spinner8.start(`Pulling ${chalk3.cyan(env)} secrets\u2026`);
+  let result;
   try {
-    const result = await pushSecrets(projectId, env, localSecrets);
-    const { added, modified, removed, unchanged } = result.changes;
-    pushSpinner.stop(
-      `Done. ${chalk3.green(`+${added}`)} added, ${chalk3.yellow(`~${modified}`)} modified, ${chalk3.red(`-${removed}`)} removed, ${chalk3.dim(`${unchanged} unchanged`)}.`
+    result = await pullSecrets(projectId, env);
+    spinner8.stop(
+      `Pulled ${result.secrets.length} secret${result.secrets.length !== 1 ? "s" : ""} from ${chalk3.bold(projectTitle ?? result.project.title)} / ${chalk3.cyan(env)}.`
     );
   } catch (err) {
-    pushSpinner.stop("Push failed.");
+    spinner8.stop("Pull failed.");
     printApiError2(err);
     process.exit(1);
   }
-  p3.outro(
-    `${chalk3.green("\u2713")} ${chalk3.bold(resolvedTitle)} / ${chalk3.cyan(env)} updated successfully.`
-  );
-}
-function computeDiff(remote, local) {
-  const remoteMap = new Map(remote.map((r) => [r.key, r.value]));
-  const localMap = new Map(local.map((r) => [r.key, r.value]));
-  const added = [];
-  const modified = [];
-  const removed = [];
-  const unchanged = [];
-  for (const [key, value] of localMap) {
-    if (!remoteMap.has(key)) {
-      added.push(key);
-    } else if (remoteMap.get(key) !== value) {
-      modified.push(key);
-    } else {
-      unchanged.push(key);
-    }
-  }
-  for (const key of remoteMap.keys()) {
-    if (!localMap.has(key)) {
-      removed.push(key);
-    }
-  }
-  added.sort();
-  modified.sort();
-  removed.sort();
-  unchanged.sort();
-  return { added, modified, removed, unchanged };
-}
-function printDiff(diff) {
-  const total = diff.added.length + diff.modified.length + diff.removed.length + diff.unchanged.length;
-  if (total === 0) {
-    p3.log.info(chalk3.dim("No secrets on remote or local."));
+  if (result.secrets.length === 0) {
+    p3.log.warn(`No secrets found for the ${chalk3.cyan(env)} environment.`);
+    p3.outro(chalk3.dim("Nothing written."));
     return;
   }
-  const lines = [];
-  for (const key of diff.added) {
-    lines.push(`  ${chalk3.green("+")} ${chalk3.green(key)}`);
-  }
-  for (const key of diff.modified) {
-    lines.push(`  ${chalk3.yellow("~")} ${chalk3.yellow(key)}`);
-  }
-  for (const key of diff.removed) {
-    lines.push(`  ${chalk3.red("-")} ${chalk3.red(key)}`);
-  }
-  for (const key of diff.unchanged) {
-    lines.push(`  ${chalk3.dim("\xB7")} ${chalk3.dim(key)}`);
-  }
-  p3.log.message(lines.join("\n"));
-  const summary = [
-    diff.added.length > 0 ? chalk3.green(`+${diff.added.length} to add`) : null,
-    diff.modified.length > 0 ? chalk3.yellow(`~${diff.modified.length} to modify`) : null,
-    diff.removed.length > 0 ? chalk3.red(`-${diff.removed.length} to remove`) : null,
-    diff.unchanged.length > 0 ? chalk3.dim(`${diff.unchanged.length} unchanged`) : null
-  ].filter(Boolean).join(chalk3.dim(", "));
-  p3.log.info(summary);
+  writeEnvFile(outputPath, result.secrets);
+  p3.outro(
+    `${chalk3.green("\u2713")} Written to ${chalk3.bold(filename)}
+  ${chalk3.dim(outputPath)}`
+  );
 }
 function printApiError2(err) {
   if (err instanceof ApiError) {
@@ -663,13 +617,15 @@ function printApiError2(err) {
   }
 }
 
-// src/commands/history.ts
+// src/commands/push.ts
 import * as p4 from "@clack/prompts";
 import chalk4 from "chalk";
+import { resolve as resolve3 } from "path";
+import { existsSync as existsSync3 } from "fs";
 init_api();
 init_env();
-async function historyCommand(projectArg, envArg) {
-  p4.intro(chalk4.bold.cyan("vaultsy history"));
+async function pushCommand(projectArg, envArg, opts) {
+  p4.intro(chalk4.bold.cyan("vaultsy push"));
   let projectId;
   let projectTitle;
   if (projectArg) {
@@ -704,7 +660,7 @@ async function historyCommand(projectArg, envArg) {
         }))
       });
       if (p4.isCancel(selected)) {
-        p4.cancel("Cancelled.");
+        p4.cancel("Push cancelled.");
         process.exit(0);
       }
       projectId = selected;
@@ -733,72 +689,131 @@ async function historyCommand(projectArg, envArg) {
       initialValue: defaultEnv ?? "development"
     });
     if (p4.isCancel(selected)) {
-      p4.cancel("Cancelled.");
+      p4.cancel("Push cancelled.");
       process.exit(0);
     }
     env = selected;
   }
-  const spinner7 = p4.spinner();
-  spinner7.start(`Fetching history for ${chalk4.cyan(env)}\u2026`);
-  let result;
-  try {
-    result = await listVersions(projectId, env);
-    spinner7.stop(
-      `${result.versions.length} snapshot${result.versions.length !== 1 ? "s" : ""} for ${chalk4.bold(projectTitle ?? result.project.title)} / ${chalk4.cyan(env)}.`
+  const filename = opts.input ?? envFileName(env);
+  const inputPath = resolve3(process.cwd(), filename);
+  if (!existsSync3(inputPath)) {
+    p4.log.error(
+      `File ${chalk4.bold(filename)} not found.
+  Run ${chalk4.cyan(`vaultsy pull ${projectId} ${env}`)} first, or specify a file with ${chalk4.dim("--input <file>")}.`
     );
+    process.exit(1);
+  }
+  const localSecrets = readEnvFile(inputPath).filter((r) => r.key && r.value);
+  if (localSecrets.length === 0) {
+    p4.log.warn(`${chalk4.bold(filename)} is empty or contains no valid KEY=VALUE pairs.`);
+    p4.outro(chalk4.dim("Nothing pushed."));
+    return;
+  }
+  p4.log.info(
+    `Read ${chalk4.bold(String(localSecrets.length))} secret${localSecrets.length !== 1 ? "s" : ""} from ${chalk4.bold(filename)}.`
+  );
+  const diffSpinner = p4.spinner();
+  diffSpinner.start("Computing diff against remote\u2026");
+  let remoteSecrets;
+  let resolvedTitle;
+  try {
+    const remote = await pullSecrets(projectId, env);
+    remoteSecrets = remote.secrets;
+    resolvedTitle = projectTitle ?? remote.project.title;
+    diffSpinner.stop("Diff computed.");
   } catch (err) {
-    spinner7.stop("Failed to fetch history.");
+    diffSpinner.stop("Failed to fetch remote secrets.");
     printApiError3(err);
     process.exit(1);
   }
-  if (result.versions.length === 0) {
-    p4.log.warn(`No version history found for the ${chalk4.cyan(env)} environment.`);
-    p4.outro(chalk4.dim("Nothing to show."));
+  const diff = computeDiff(remoteSecrets, localSecrets);
+  printDiff(diff);
+  const hasChanges = diff.added.length > 0 || diff.modified.length > 0 || diff.removed.length > 0;
+  if (!hasChanges) {
+    p4.outro(`${chalk4.dim("No changes.")} Remote ${chalk4.cyan(env)} is already up to date.`);
     return;
   }
-  const COL_VER = 7;
-  const COL_SECRETS = 7;
-  const COL_BY = 20;
-  const COL_DATE = 22;
-  const header = chalk4.bold(padEnd("#", COL_VER)) + chalk4.dim(" \u2502 ") + chalk4.bold(padEnd("VERSION ID", 26)) + chalk4.dim(" \u2502 ") + chalk4.bold(padEnd("KEYS", COL_SECRETS)) + chalk4.dim(" \u2502 ") + chalk4.bold(padEnd("CREATED BY", COL_BY)) + chalk4.dim(" \u2502 ") + chalk4.bold(padEnd("DATE", COL_DATE));
-  const divider = chalk4.dim(
-    "\u2500".repeat(COL_VER) + "\u2500\u253C\u2500" + "\u2500".repeat(26) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_SECRETS) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_BY) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_DATE)
+  if (!opts.yes) {
+    const confirmed = await p4.confirm({
+      message: `Push these changes to ${chalk4.bold(resolvedTitle)} / ${chalk4.cyan(env)}?`,
+      initialValue: true
+    });
+    if (p4.isCancel(confirmed) || !confirmed) {
+      p4.cancel("Push cancelled.");
+      process.exit(0);
+    }
+  }
+  const pushSpinner = p4.spinner();
+  pushSpinner.start(`Pushing to ${chalk4.cyan(env)}\u2026`);
+  try {
+    const result = await pushSecrets(projectId, env, localSecrets);
+    const { added, modified, removed, unchanged } = result.changes;
+    pushSpinner.stop(
+      `Done. ${chalk4.green(`+${added}`)} added, ${chalk4.yellow(`~${modified}`)} modified, ${chalk4.red(`-${removed}`)} removed, ${chalk4.dim(`${unchanged} unchanged`)}.`
+    );
+  } catch (err) {
+    pushSpinner.stop("Push failed.");
+    printApiError3(err);
+    process.exit(1);
+  }
+  p4.outro(
+    `${chalk4.green("\u2713")} ${chalk4.bold(resolvedTitle)} / ${chalk4.cyan(env)} updated successfully.`
   );
-  const rows = result.versions.map((v, i) => {
-    const isLatest = i === 0;
-    const vNum = isLatest ? chalk4.green(padEnd(`v${v.versionNumber}`, COL_VER)) : chalk4.dim(padEnd(`v${v.versionNumber}`, COL_VER));
-    const vId = chalk4.dim(padEnd(v.id, 26));
-    const secrets = padEnd(String(v.secretCount), COL_SECRETS);
-    const by = padEnd(v.createdBy?.name ?? chalk4.italic("system"), COL_BY);
-    const date = padEnd(formatDate(v.createdAt), COL_DATE);
-    const latestBadge = isLatest ? chalk4.green(" \u2190 latest") : "";
-    return vNum + chalk4.dim(" \u2502 ") + vId + chalk4.dim(" \u2502 ") + secrets + chalk4.dim(" \u2502 ") + by + chalk4.dim(" \u2502 ") + date + latestBadge;
-  });
-  const lines = [header, divider, ...rows];
+}
+function computeDiff(remote, local) {
+  const remoteMap = new Map(remote.map((r) => [r.key, r.value]));
+  const localMap = new Map(local.map((r) => [r.key, r.value]));
+  const added = [];
+  const modified = [];
+  const removed = [];
+  const unchanged = [];
+  for (const [key, value] of localMap) {
+    if (!remoteMap.has(key)) {
+      added.push(key);
+    } else if (remoteMap.get(key) !== value) {
+      modified.push(key);
+    } else {
+      unchanged.push(key);
+    }
+  }
+  for (const key of remoteMap.keys()) {
+    if (!localMap.has(key)) {
+      removed.push(key);
+    }
+  }
+  added.sort();
+  modified.sort();
+  removed.sort();
+  unchanged.sort();
+  return { added, modified, removed, unchanged };
+}
+function printDiff(diff) {
+  const total = diff.added.length + diff.modified.length + diff.removed.length + diff.unchanged.length;
+  if (total === 0) {
+    p4.log.info(chalk4.dim("No secrets on remote or local."));
+    return;
+  }
+  const lines = [];
+  for (const key of diff.added) {
+    lines.push(`  ${chalk4.green("+")} ${chalk4.green(key)}`);
+  }
+  for (const key of diff.modified) {
+    lines.push(`  ${chalk4.yellow("~")} ${chalk4.yellow(key)}`);
+  }
+  for (const key of diff.removed) {
+    lines.push(`  ${chalk4.red("-")} ${chalk4.red(key)}`);
+  }
+  for (const key of diff.unchanged) {
+    lines.push(`  ${chalk4.dim("\xB7")} ${chalk4.dim(key)}`);
+  }
   p4.log.message(lines.join("\n"));
-  p4.log.info(
-    `To rollback, run: ${chalk4.cyan(`vaultsy rollback ${projectId} ${env} <VERSION_ID>`)}`
-  );
-  p4.outro(chalk4.dim("Done."));
-}
-var ANSI_REGEX = new RegExp("\x1B\\[[0-9;]*m", "g");
-function padEnd(str, length) {
-  const visible = str.replace(ANSI_REGEX, "");
-  const pad = Math.max(0, length - visible.length);
-  return str + " ".repeat(pad);
-}
-function formatDate(iso) {
-  const d = new Date(iso);
-  const date = d.toLocaleDateString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric"
-  });
-  const time = d.toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit"
-  });
-  return `${date}, ${time}`;
+  const summary = [
+    diff.added.length > 0 ? chalk4.green(`+${diff.added.length} to add`) : null,
+    diff.modified.length > 0 ? chalk4.yellow(`~${diff.modified.length} to modify`) : null,
+    diff.removed.length > 0 ? chalk4.red(`-${diff.removed.length} to remove`) : null,
+    diff.unchanged.length > 0 ? chalk4.dim(`${diff.unchanged.length} unchanged`) : null
+  ].filter(Boolean).join(chalk4.dim(", "));
+  p4.log.info(summary);
 }
 function printApiError3(err) {
   if (err instanceof ApiError) {
@@ -816,13 +831,13 @@ function printApiError3(err) {
   }
 }
 
-// src/commands/rollback.ts
+// src/commands/history.ts
 import * as p5 from "@clack/prompts";
 import chalk5 from "chalk";
 init_api();
 init_env();
-async function rollbackCommand(projectArg, envArg, versionIdArg, opts) {
-  p5.intro(chalk5.bold.cyan("vaultsy rollback"));
+async function historyCommand(projectArg, envArg) {
+  p5.intro(chalk5.bold.cyan("vaultsy history"));
   let projectId;
   let projectTitle;
   if (projectArg) {
@@ -833,14 +848,14 @@ async function rollbackCommand(projectArg, envArg, versionIdArg, opts) {
       projectId = found.config.project;
       p5.log.info(`Using project ${chalk5.cyan(projectId)} from ${chalk5.dim("vaultsy.json")}`);
     } else {
-      const spinner8 = p5.spinner();
-      spinner8.start("Fetching projects\u2026");
+      const spinner9 = p5.spinner();
+      spinner9.start("Fetching projects\u2026");
       let projects;
       try {
         projects = await listProjects();
-        spinner8.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+        spinner9.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
       } catch (err) {
-        spinner8.stop("Failed to fetch projects.");
+        spinner9.stop("Failed to fetch projects.");
         printApiError4(err);
         process.exit(1);
       }
@@ -857,7 +872,7 @@ async function rollbackCommand(projectArg, envArg, versionIdArg, opts) {
         }))
       });
       if (p5.isCancel(selected)) {
-        p5.cancel("Rollback cancelled.");
+        p5.cancel("Cancelled.");
         process.exit(0);
       }
       projectId = selected;
@@ -886,92 +901,72 @@ async function rollbackCommand(projectArg, envArg, versionIdArg, opts) {
       initialValue: defaultEnv ?? "development"
     });
     if (p5.isCancel(selected)) {
-      p5.cancel("Rollback cancelled.");
+      p5.cancel("Cancelled.");
       process.exit(0);
     }
     env = selected;
   }
-  let versionId;
-  let versionNumber;
-  if (versionIdArg) {
-    versionId = versionIdArg;
-  } else {
-    const spinner8 = p5.spinner();
-    spinner8.start(`Fetching version history for ${chalk5.cyan(env)}\u2026`);
-    let versionsResult;
-    try {
-      versionsResult = await listVersions(projectId, env);
-      spinner8.stop(
-        `Found ${versionsResult.versions.length} snapshot${versionsResult.versions.length !== 1 ? "s" : ""}.`
-      );
-    } catch (err) {
-      spinner8.stop("Failed to fetch version history.");
-      printApiError4(err);
-      process.exit(1);
-    }
-    if (versionsResult.versions.length === 0) {
-      p5.log.error(`No version history found for the ${chalk5.cyan(env)} environment.`);
-      process.exit(1);
-    }
-    const pickable = versionsResult.versions;
-    const selected = await p5.select({
-      message: "Select a version to roll back to",
-      options: pickable.map((v, i) => ({
-        value: v.id,
-        label: `v${v.versionNumber}  \u2014  ${v.secretCount} key${v.secretCount !== 1 ? "s" : ""}  \u2014  ${formatDate2(v.createdAt)}`,
-        hint: i === 0 ? "current" : v.createdBy?.name ? `by ${v.createdBy.name}` : void 0
-      }))
-    });
-    if (p5.isCancel(selected)) {
-      p5.cancel("Rollback cancelled.");
-      process.exit(0);
-    }
-    versionId = selected;
-    versionNumber = versionsResult.versions.find((v) => v.id === selected)?.versionNumber;
-    projectTitle ??= versionsResult.project.title;
-  }
-  if (!opts.yes) {
-    const label = versionNumber !== void 0 ? `v${versionNumber} (${chalk5.dim(versionId)})` : chalk5.dim(versionId);
-    p5.log.warn(
-      `This will overwrite all ${chalk5.bold(env)} secrets with the state from snapshot ${label}.
-  A new snapshot will be created automatically so you can undo this rollback too.`
-    );
-    const confirmed = await p5.confirm({
-      message: `Roll back ${chalk5.bold(projectTitle ?? projectId)} / ${chalk5.cyan(env)} to ${label}?`,
-      initialValue: false
-    });
-    if (p5.isCancel(confirmed) || !confirmed) {
-      p5.cancel("Rollback cancelled.");
-      process.exit(0);
-    }
-  }
-  const spinner7 = p5.spinner();
-  spinner7.start("Rolling back\u2026");
+  const spinner8 = p5.spinner();
+  spinner8.start(`Fetching history for ${chalk5.cyan(env)}\u2026`);
+  let result;
   try {
-    const result = await rollback(projectId, env, versionId);
-    const { added, modified, removed, unchanged } = result.changes;
-    spinner7.stop(
-      `Rolled back to v${result.rolledBackTo.versionNumber}. ${chalk5.green(`+${added}`)} added, ${chalk5.yellow(`~${modified}`)} modified, ${chalk5.red(`-${removed}`)} removed, ${chalk5.dim(`${unchanged} unchanged`)}.`
-    );
-    p5.outro(
-      `${chalk5.green("\u2713")} ${chalk5.bold(projectTitle ?? result.project.title)} / ${chalk5.cyan(env)} rolled back to ${chalk5.bold(`v${result.rolledBackTo.versionNumber}`)}.`
+    result = await listVersions(projectId, env);
+    spinner8.stop(
+      `${result.versions.length} snapshot${result.versions.length !== 1 ? "s" : ""} for ${chalk5.bold(projectTitle ?? result.project.title)} / ${chalk5.cyan(env)}.`
     );
   } catch (err) {
-    spinner7.stop("Rollback failed.");
+    spinner8.stop("Failed to fetch history.");
     printApiError4(err);
     process.exit(1);
   }
+  if (result.versions.length === 0) {
+    p5.log.warn(`No version history found for the ${chalk5.cyan(env)} environment.`);
+    p5.outro(chalk5.dim("Nothing to show."));
+    return;
+  }
+  const COL_VER = 7;
+  const COL_SECRETS = 7;
+  const COL_BY = 20;
+  const COL_DATE = 22;
+  const header = chalk5.bold(padEnd2("#", COL_VER)) + chalk5.dim(" \u2502 ") + chalk5.bold(padEnd2("VERSION ID", 26)) + chalk5.dim(" \u2502 ") + chalk5.bold(padEnd2("KEYS", COL_SECRETS)) + chalk5.dim(" \u2502 ") + chalk5.bold(padEnd2("CREATED BY", COL_BY)) + chalk5.dim(" \u2502 ") + chalk5.bold(padEnd2("DATE", COL_DATE));
+  const divider = chalk5.dim(
+    "\u2500".repeat(COL_VER) + "\u2500\u253C\u2500" + "\u2500".repeat(26) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_SECRETS) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_BY) + "\u2500\u253C\u2500" + "\u2500".repeat(COL_DATE)
+  );
+  const rows = result.versions.map((v, i) => {
+    const isLatest = i === 0;
+    const vNum = isLatest ? chalk5.green(padEnd2(`v${v.versionNumber}`, COL_VER)) : chalk5.dim(padEnd2(`v${v.versionNumber}`, COL_VER));
+    const vId = chalk5.dim(padEnd2(v.id, 26));
+    const secrets = padEnd2(String(v.secretCount), COL_SECRETS);
+    const by = padEnd2(v.createdBy?.name ?? chalk5.italic("system"), COL_BY);
+    const date = padEnd2(formatDate(v.createdAt), COL_DATE);
+    const latestBadge = isLatest ? chalk5.green(" \u2190 latest") : "";
+    return vNum + chalk5.dim(" \u2502 ") + vId + chalk5.dim(" \u2502 ") + secrets + chalk5.dim(" \u2502 ") + by + chalk5.dim(" \u2502 ") + date + latestBadge;
+  });
+  const lines = [header, divider, ...rows];
+  p5.log.message(lines.join("\n"));
+  p5.log.info(
+    `To rollback, run: ${chalk5.cyan(`vaultsy rollback ${projectId} ${env} <VERSION_ID>`)}`
+  );
+  p5.outro(chalk5.dim("Done."));
 }
-function formatDate2(iso) {
+var ANSI_REGEX2 = new RegExp("\x1B\\[[0-9;]*m", "g");
+function padEnd2(str, length) {
+  const visible = str.replace(ANSI_REGEX2, "");
+  const pad = Math.max(0, length - visible.length);
+  return str + " ".repeat(pad);
+}
+function formatDate(iso) {
   const d = new Date(iso);
-  return d.toLocaleDateString("en-GB", {
+  const date = d.toLocaleDateString("en-GB", {
     day: "2-digit",
     month: "short",
     year: "numeric"
-  }) + ", " + d.toLocaleTimeString("en-GB", {
+  });
+  const time = d.toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit"
   });
+  return `${date}, ${time}`;
 }
 function printApiError4(err) {
   if (err instanceof ApiError) {
@@ -989,22 +984,13 @@ function printApiError4(err) {
   }
 }
 
-// src/commands/run.ts
+// src/commands/rollback.ts
 import * as p6 from "@clack/prompts";
 import chalk6 from "chalk";
-import { spawn } from "child_process";
 init_api();
 init_env();
-async function runCommand(projectArg, envArg, commandArgs, _opts) {
-  if (commandArgs.length === 0) {
-    p6.log.error(
-      `No command specified.
-  Usage: ${chalk6.cyan("vaultsy run <project> <env> -- <command> [args...]")}
-  Example: ${chalk6.dim("vaultsy run my-app production -- node server.js")}`
-    );
-    process.exit(1);
-  }
-  p6.intro(chalk6.bold.cyan("vaultsy run"));
+async function rollbackCommand(projectArg, envArg, versionIdArg, opts) {
+  p6.intro(chalk6.bold.cyan("vaultsy rollback"));
   let projectId;
   let projectTitle;
   if (projectArg) {
@@ -1015,14 +1001,14 @@ async function runCommand(projectArg, envArg, commandArgs, _opts) {
       projectId = found.config.project;
       p6.log.info(`Using project ${chalk6.cyan(projectId)} from ${chalk6.dim("vaultsy.json")}`);
     } else {
-      const spinner8 = p6.spinner();
-      spinner8.start("Fetching projects\u2026");
+      const spinner9 = p6.spinner();
+      spinner9.start("Fetching projects\u2026");
       let projects;
       try {
         projects = await listProjects();
-        spinner8.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+        spinner9.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
       } catch (err) {
-        spinner8.stop("Failed to fetch projects.");
+        spinner9.stop("Failed to fetch projects.");
         printApiError5(err);
         process.exit(1);
       }
@@ -1039,7 +1025,7 @@ async function runCommand(projectArg, envArg, commandArgs, _opts) {
         }))
       });
       if (p6.isCancel(selected)) {
-        p6.cancel("Run cancelled.");
+        p6.cancel("Rollback cancelled.");
         process.exit(0);
       }
       projectId = selected;
@@ -1068,24 +1054,206 @@ async function runCommand(projectArg, envArg, commandArgs, _opts) {
       initialValue: defaultEnv ?? "development"
     });
     if (p6.isCancel(selected)) {
-      p6.cancel("Run cancelled.");
+      p6.cancel("Rollback cancelled.");
       process.exit(0);
     }
     env = selected;
   }
-  const spinner7 = p6.spinner();
-  spinner7.start(`Pulling ${chalk6.cyan(env)} secrets\u2026`);
+  let versionId;
+  let versionNumber;
+  if (versionIdArg) {
+    versionId = versionIdArg;
+  } else {
+    const spinner9 = p6.spinner();
+    spinner9.start(`Fetching version history for ${chalk6.cyan(env)}\u2026`);
+    let versionsResult;
+    try {
+      versionsResult = await listVersions(projectId, env);
+      spinner9.stop(
+        `Found ${versionsResult.versions.length} snapshot${versionsResult.versions.length !== 1 ? "s" : ""}.`
+      );
+    } catch (err) {
+      spinner9.stop("Failed to fetch version history.");
+      printApiError5(err);
+      process.exit(1);
+    }
+    if (versionsResult.versions.length === 0) {
+      p6.log.error(`No version history found for the ${chalk6.cyan(env)} environment.`);
+      process.exit(1);
+    }
+    const pickable = versionsResult.versions;
+    const selected = await p6.select({
+      message: "Select a version to roll back to",
+      options: pickable.map((v, i) => ({
+        value: v.id,
+        label: `v${v.versionNumber}  \u2014  ${v.secretCount} key${v.secretCount !== 1 ? "s" : ""}  \u2014  ${formatDate2(v.createdAt)}`,
+        hint: i === 0 ? "current" : v.createdBy?.name ? `by ${v.createdBy.name}` : void 0
+      }))
+    });
+    if (p6.isCancel(selected)) {
+      p6.cancel("Rollback cancelled.");
+      process.exit(0);
+    }
+    versionId = selected;
+    versionNumber = versionsResult.versions.find((v) => v.id === selected)?.versionNumber;
+    projectTitle ??= versionsResult.project.title;
+  }
+  if (!opts.yes) {
+    const label = versionNumber !== void 0 ? `v${versionNumber} (${chalk6.dim(versionId)})` : chalk6.dim(versionId);
+    p6.log.warn(
+      `This will overwrite all ${chalk6.bold(env)} secrets with the state from snapshot ${label}.
+  A new snapshot will be created automatically so you can undo this rollback too.`
+    );
+    const confirmed = await p6.confirm({
+      message: `Roll back ${chalk6.bold(projectTitle ?? projectId)} / ${chalk6.cyan(env)} to ${label}?`,
+      initialValue: false
+    });
+    if (p6.isCancel(confirmed) || !confirmed) {
+      p6.cancel("Rollback cancelled.");
+      process.exit(0);
+    }
+  }
+  const spinner8 = p6.spinner();
+  spinner8.start("Rolling back\u2026");
+  try {
+    const result = await rollback(projectId, env, versionId);
+    const { added, modified, removed, unchanged } = result.changes;
+    spinner8.stop(
+      `Rolled back to v${result.rolledBackTo.versionNumber}. ${chalk6.green(`+${added}`)} added, ${chalk6.yellow(`~${modified}`)} modified, ${chalk6.red(`-${removed}`)} removed, ${chalk6.dim(`${unchanged} unchanged`)}.`
+    );
+    p6.outro(
+      `${chalk6.green("\u2713")} ${chalk6.bold(projectTitle ?? result.project.title)} / ${chalk6.cyan(env)} rolled back to ${chalk6.bold(`v${result.rolledBackTo.versionNumber}`)}.`
+    );
+  } catch (err) {
+    spinner8.stop("Rollback failed.");
+    printApiError5(err);
+    process.exit(1);
+  }
+}
+function formatDate2(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric"
+  }) + ", " + d.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+function printApiError5(err) {
+  if (err instanceof ApiError) {
+    if (err.status === 401) {
+      p6.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
+    } else if (err.status === 404) {
+      p6.log.error("Project or environment not found. Check the project ID and environment name.");
+    } else {
+      p6.log.error(`API error ${err.status}: ${err.message}`);
+    }
+  } else if (err instanceof Error) {
+    p6.log.error(err.message);
+  } else {
+    p6.log.error("An unexpected error occurred.");
+  }
+}
+
+// src/commands/run.ts
+import * as p7 from "@clack/prompts";
+import chalk7 from "chalk";
+import { spawn } from "child_process";
+init_api();
+init_env();
+async function runCommand(projectArg, envArg, commandArgs, _opts) {
+  if (commandArgs.length === 0) {
+    p7.log.error(
+      `No command specified.
+  Usage: ${chalk7.cyan("vaultsy run <project> <env> -- <command> [args...]")}
+  Example: ${chalk7.dim("vaultsy run my-app production -- node server.js")}`
+    );
+    process.exit(1);
+  }
+  p7.intro(chalk7.bold.cyan("vaultsy run"));
+  let projectId;
+  let projectTitle;
+  if (projectArg) {
+    projectId = projectArg;
+  } else {
+    const found = findProjectConfig();
+    if (found) {
+      projectId = found.config.project;
+      p7.log.info(`Using project ${chalk7.cyan(projectId)} from ${chalk7.dim("vaultsy.json")}`);
+    } else {
+      const spinner9 = p7.spinner();
+      spinner9.start("Fetching projects\u2026");
+      let projects;
+      try {
+        projects = await listProjects();
+        spinner9.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+      } catch (err) {
+        spinner9.stop("Failed to fetch projects.");
+        printApiError6(err);
+        process.exit(1);
+      }
+      if (projects.length === 0) {
+        p7.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+        process.exit(1);
+      }
+      const selected = await p7.select({
+        message: "Select a project",
+        options: projects.map((proj) => ({
+          value: proj.id,
+          label: proj.title,
+          hint: proj.id
+        }))
+      });
+      if (p7.isCancel(selected)) {
+        p7.cancel("Run cancelled.");
+        process.exit(0);
+      }
+      projectId = selected;
+      projectTitle = projects.find((proj) => proj.id === selected)?.title;
+    }
+  }
+  let env;
+  if (envArg) {
+    if (!EnvironmentType.includes(envArg)) {
+      p7.log.error(
+        `Invalid environment "${envArg}". Must be one of: ${EnvironmentType.join(", ")}.`
+      );
+      process.exit(1);
+    }
+    env = envArg;
+  } else {
+    const found = findProjectConfig();
+    const defaultEnv = found?.config.defaultEnv;
+    const selected = await p7.select({
+      message: "Select an environment",
+      options: EnvironmentType.map((e) => ({
+        value: e,
+        label: e,
+        hint: e === defaultEnv ? "default" : void 0
+      })),
+      initialValue: defaultEnv ?? "development"
+    });
+    if (p7.isCancel(selected)) {
+      p7.cancel("Run cancelled.");
+      process.exit(0);
+    }
+    env = selected;
+  }
+  const spinner8 = p7.spinner();
+  spinner8.start(`Pulling ${chalk7.cyan(env)} secrets\u2026`);
   let secrets;
   try {
     const result = await pullSecrets(projectId, env);
     secrets = result.secrets;
     projectTitle ??= result.project.title;
-    spinner7.stop(
-      `Injecting ${secrets.length} secret${secrets.length !== 1 ? "s" : ""} from ${chalk6.bold(projectTitle)} / ${chalk6.cyan(env)}.`
+    spinner8.stop(
+      `Injecting ${secrets.length} secret${secrets.length !== 1 ? "s" : ""} from ${chalk7.bold(projectTitle)} / ${chalk7.cyan(env)}.`
     );
   } catch (err) {
-    spinner7.stop("Failed to pull secrets.");
-    printApiError5(err);
+    spinner8.stop("Failed to pull secrets.");
+    printApiError6(err);
     process.exit(1);
   }
   const injectedEnv = {
@@ -1095,13 +1263,13 @@ async function runCommand(projectArg, envArg, commandArgs, _opts) {
     // shell env wins
   };
   if (secrets.length > 0) {
-    const keyList = secrets.map((s) => chalk6.dim(s.key)).join(", ");
-    p6.log.info(`Injecting: ${keyList}`);
+    const keyList = secrets.map((s) => chalk7.dim(s.key)).join(", ");
+    p7.log.info(`Injecting: ${keyList}`);
   } else {
-    p6.log.warn("No secrets found \u2014 running with current environment only.");
+    p7.log.warn("No secrets found \u2014 running with current environment only.");
   }
   const [bin, ...args] = commandArgs;
-  p6.log.step(`${chalk6.bold("$")} ${chalk6.white([bin, ...args].join(" "))}`);
+  p7.log.step(`${chalk7.bold("$")} ${chalk7.white([bin, ...args].join(" "))}`);
   process.stdout.write("");
   const child = spawn(bin, args, {
     env: injectedEnv,
@@ -1120,12 +1288,12 @@ async function runCommand(projectArg, envArg, commandArgs, _opts) {
   process.on("SIGHUP", () => forwardSignal("SIGHUP"));
   child.on("error", (err) => {
     if (err.code === "ENOENT") {
-      p6.log.error(
-        `Command not found: ${chalk6.bold(bin)}
+      p7.log.error(
+        `Command not found: ${chalk7.bold(bin)}
   Make sure it is installed and available in your PATH.`
       );
     } else {
-      p6.log.error(`Failed to start process: ${err.message}`);
+      p7.log.error(`Failed to start process: ${err.message}`);
     }
     process.exit(1);
   });
@@ -1136,7 +1304,7 @@ async function runCommand(projectArg, envArg, commandArgs, _opts) {
     }
     const exitCode = code ?? 1;
     if (exitCode !== 0) {
-      p6.log.warn(`Process exited with code ${chalk6.bold(String(exitCode))}.`);
+      p7.log.warn(`Process exited with code ${chalk7.bold(String(exitCode))}.`);
     }
     process.exit(exitCode);
   });
@@ -1166,19 +1334,19 @@ function signalToNumber(signal) {
   };
   return map[signal] ?? 0;
 }
-function printApiError5(err) {
+function printApiError6(err) {
   if (err instanceof ApiError) {
     if (err.status === 401) {
-      p6.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
+      p7.log.error("Unauthorized. Run `vaultsy login` to re-authenticate.");
     } else if (err.status === 404) {
-      p6.log.error("Project or environment not found. Check the project ID and environment name.");
+      p7.log.error("Project or environment not found. Check the project ID and environment name.");
     } else {
-      p6.log.error(`API error ${err.status}: ${err.message}`);
+      p7.log.error(`API error ${err.status}: ${err.message}`);
     }
   } else if (err instanceof Error) {
-    p6.log.error(err.message);
+    p7.log.error(err.message);
   } else {
-    p6.log.error("An unexpected error occurred.");
+    p7.log.error("An unexpected error occurred.");
   }
 }
 
@@ -1193,14 +1361,14 @@ program.command("login").description("Authenticate with your Vaultsy instance an
 });
 program.command("logout").description("Remove locally stored credentials (~/.vaultsy/config.json)").action(async () => {
   const { clearConfig: clearConfig2, configExists: configExists2 } = await Promise.resolve().then(() => (init_config(), config_exports));
-  const p7 = await import("@clack/prompts");
-  const chalk7 = (await import("chalk")).default;
+  const p8 = await import("@clack/prompts");
+  const chalk8 = (await import("chalk")).default;
   if (!configExists2()) {
-    p7.log.warn("No credentials found \u2014 already logged out.");
+    p8.log.warn("No credentials found \u2014 already logged out.");
     return;
   }
   clearConfig2();
-  p7.log.success(chalk7.green("\u2713") + " Logged out. Credentials removed.");
+  p8.log.success(chalk8.green("\u2713") + " Logged out. Credentials removed.");
 });
 program.command("pull [project] [env]").description("Pull secrets from Vaultsy and write them to a local .env file").option("-o, --output <file>", "Output file path (default: .env or .env.<env>)").option("-y, --yes", "Skip confirmation prompts").action(
   async (project, env, opts) => {
@@ -1212,6 +1380,12 @@ program.command("push [project] [env]").description("Push secrets from a local .
     await pushCommand(project, env, opts);
   }
 );
+program.command("envs [project]").description("Show secrets for a project across all environments (values hidden by default)").option(
+  "-e, --env <env>",
+  "Show only a specific environment (development, staging, preview, production)"
+).option("-s, --show-values", "Reveal secret values in the output").action(async (project, opts) => {
+  await envsCommand(project, opts);
+});
 program.command("history [project] [env]").description("List version snapshots for an environment").action(async (project, env) => {
   await historyCommand(project, env);
 });
@@ -1233,35 +1407,35 @@ program.command("run [project] [env]").description(
 program.command("init").description(
   "Create a vaultsy.json in the current directory to pin a project and default environment"
 ).action(async () => {
-  const p7 = await import("@clack/prompts");
-  const chalk7 = (await import("chalk")).default;
+  const p8 = await import("@clack/prompts");
+  const chalk8 = (await import("chalk")).default;
   const { listProjects: listProjects2 } = await Promise.resolve().then(() => (init_api(), api_exports));
   const { writeProjectConfig: writeProjectConfig2, findProjectConfig: findProjectConfig2 } = await Promise.resolve().then(() => (init_env(), env_exports));
-  p7.intro(chalk7.bold.cyan("vaultsy init"));
+  p8.intro(chalk8.bold.cyan("vaultsy init"));
   const existing = findProjectConfig2();
   if (existing) {
-    p7.log.warn(
-      `A ${chalk7.bold("vaultsy.json")} already exists at ${chalk7.dim(existing.dir)}.
+    p8.log.warn(
+      `A ${chalk8.bold("vaultsy.json")} already exists at ${chalk8.dim(existing.dir)}.
   Delete it first if you want to re-initialise.`
     );
     process.exit(0);
   }
-  const spinner7 = p7.spinner();
-  spinner7.start("Fetching your projects\u2026");
+  const spinner8 = p8.spinner();
+  spinner8.start("Fetching your projects\u2026");
   let projects;
   try {
     projects = await listProjects2();
-    spinner7.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
+    spinner8.stop(`Found ${projects.length} project${projects.length !== 1 ? "s" : ""}.`);
   } catch (err) {
-    spinner7.stop("Failed to fetch projects.");
-    if (err instanceof Error) p7.log.error(err.message);
+    spinner8.stop("Failed to fetch projects.");
+    if (err instanceof Error) p8.log.error(err.message);
     process.exit(1);
   }
   if (projects.length === 0) {
-    p7.log.error("No projects found. Create one at your Vaultsy dashboard first.");
+    p8.log.error("No projects found. Create one at your Vaultsy dashboard first.");
     process.exit(1);
   }
-  const selectedProject = await p7.select({
+  const selectedProject = await p8.select({
     message: "Which project does this directory belong to?",
     options: projects.map((proj) => ({
       value: proj.id,
@@ -1269,37 +1443,37 @@ program.command("init").description(
       hint: proj.id
     }))
   });
-  if (p7.isCancel(selectedProject)) {
-    p7.cancel("Init cancelled.");
+  if (p8.isCancel(selectedProject)) {
+    p8.cancel("Init cancelled.");
     process.exit(0);
   }
-  const selectedEnv = await p7.select({
+  const selectedEnv = await p8.select({
     message: "Default environment for this directory?",
     options: EnvironmentType.map((e) => ({ value: e, label: e })),
     initialValue: "development"
   });
-  if (p7.isCancel(selectedEnv)) {
-    p7.cancel("Init cancelled.");
+  if (p8.isCancel(selectedEnv)) {
+    p8.cancel("Init cancelled.");
     process.exit(0);
   }
   writeProjectConfig2({ project: selectedProject, defaultEnv: selectedEnv });
-  p7.outro(
-    `${chalk7.green("\u2713")} Created ${chalk7.bold("vaultsy.json")}
-  Run ${chalk7.cyan("vaultsy pull")} or ${chalk7.cyan("vaultsy push")} with no arguments from this directory.`
+  p8.outro(
+    `${chalk8.green("\u2713")} Created ${chalk8.bold("vaultsy.json")}
+  Run ${chalk8.cyan("vaultsy pull")} or ${chalk8.cyan("vaultsy push")} with no arguments from this directory.`
   );
 });
 program.command("whoami").description("Show the currently authenticated user").action(async () => {
-  const p7 = await import("@clack/prompts");
-  const chalk7 = (await import("chalk")).default;
+  const p8 = await import("@clack/prompts");
+  const chalk8 = (await import("chalk")).default;
   const { getMe: getMe2 } = await Promise.resolve().then(() => (init_api(), api_exports));
   try {
     const me = await getMe2();
-    p7.log.success(`Logged in as ${chalk7.bold(me.name)} ${chalk7.dim(`<${me.email}>`)}`);
+    p8.log.success(`Logged in as ${chalk8.bold(me.name)} ${chalk8.dim(`<${me.email}>`)}`);
   } catch (err) {
     if (err instanceof Error) {
-      p7.log.error(err.message);
+      p8.log.error(err.message);
     } else {
-      p7.log.error("Not authenticated. Run `vaultsy login` first.");
+      p8.log.error("Not authenticated. Run `vaultsy login` first.");
     }
     process.exit(1);
   }
