@@ -2,8 +2,7 @@
 	import { Card, CardHeader, CardTitle, CardContent } from '$lib/components/ui/card';
 	import { Button } from '$lib/components/ui/button';
 	import { Tabs, TabsList, TabsTrigger, TabsContent } from '$lib/components/ui/tabs';
-	import { EnvironmentType } from '$lib/shared/enums';
-	import type { Environment } from '$lib/shared/enums';
+	import { EnvironmentType, type Environment } from '$lib/shared/enums';
 	import Copy from '@lucide/svelte/icons/copy';
 	import Download from '@lucide/svelte/icons/download';
 	import Eye from '@lucide/svelte/icons/eye';
@@ -28,8 +27,18 @@
 	const projectId = $derived(data.projectId);
 	const callerRole = $derived(data.callerRole);
 	const canWrite = $derived(callerRole === 'owner' || callerRole === 'admin');
+
+	// Precompute the env → data map once per render so the {#each} body never
+	// calls Array.find() in a hot loop (O(n²) → O(1) per lookup).
+	const envDataMap = $derived(new Map(project.environments.map((e) => [e.name as Environment, e])));
+
 	let visibleSecrets: Record<string, boolean> = $state({});
+
+	// Track the active setTimeout id so we can clear it if the user clicks
+	// copy again before the 2-second timeout fires — prevents stale resets.
 	let copiedKey: string | null = $state(null);
+	let copiedKeyTimer: ReturnType<typeof setTimeout> | null = null;
+
 	let activeTab = $state('development');
 
 	let envSubTab: Record<string, 'secrets' | 'history'> = $state(
@@ -38,9 +47,8 @@
 
 	onMount(() => {
 		const tab = page.url.searchParams.get('tab');
-		if (tab) {
-			activeTab = tab;
-		}
+		if (tab) activeTab = tab;
+
 		if (page.url.searchParams.get('joined') === '1') {
 			activeTab = 'team';
 			toast.success(`You joined "${project.title}"! Welcome to the team.`);
@@ -74,53 +82,54 @@
 
 	async function copyToClipboard(text: string, key: string) {
 		await navigator.clipboard.writeText(text);
+		// Clear any previous pending reset before setting a new one.
+		if (copiedKeyTimer !== null) clearTimeout(copiedKeyTimer);
 		copiedKey = key;
-		setTimeout(() => {
+		copiedKeyTimer = setTimeout(() => {
 			copiedKey = null;
+			copiedKeyTimer = null;
 		}, 2000);
 	}
 
-	function exportAsEnv(envName: string) {
-		const env = project.environments.find((e) => e.name === envName);
-		if (!env) return '';
+	// Shared export helper — iterates the secret list exactly once and builds
+	// all three output formats in a single reduce pass.
+	function buildExports(envName: Environment): {
+		env: string;
+		json: string;
+		dotnet: string;
+	} {
+		const env = envDataMap.get(envName);
+		if (!env || env.secrets.length === 0) {
+			return { env: '', json: '{}', dotnet: '{}' };
+		}
 
-		const lines = env.secrets.map((s) => {
-			const val = s.value;
-			// Values that contain spaces, #, $, quotes, or backslashes must be quoted.
-			const needsQuoting = /[\s#$"'\\`]/.test(val) || val === '';
-			if (needsQuoting) {
-				// Double-quote the value and escape any inner double-quotes and backslashes.
-				const escaped = val.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-				return `${s.key}="${escaped}"`;
-			}
-			return `${s.key}=${val}`;
-		});
+		const { envLines, jsonObj, dotnetObj } = env.secrets.reduce<{
+			envLines: string[];
+			jsonObj: Record<string, string>;
+			dotnetObj: Record<string, string>;
+		}>(
+			(acc, s) => {
+				const val = s.value;
+				// .env format — quote values containing special characters.
+				const needsQuoting = /[\s#$"'\\`]/.test(val) || val === '';
+				const envLine = needsQuoting
+					? `${s.key}="${val.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+					: `${s.key}=${val}`;
+				acc.envLines.push(envLine);
+				acc.jsonObj[s.key] = val;
+				// .NET appsettings convention: __ → :
+				acc.dotnetObj[s.key.replace(/__/g, ':')] = val;
+				return acc;
+			},
+			{ envLines: [], jsonObj: {}, dotnetObj: {} }
+		);
 
-		// Always end with a trailing newline — POSIX text file convention.
-		return lines.join('\n') + '\n';
-	}
-
-	function exportAsJson(envName: string) {
-		const env = project.environments.find((e) => e.name === envName);
-		if (!env) return '{}';
-
-		const obj: Record<string, string> = {};
-		env.secrets.forEach((s) => {
-			obj[s.key] = s.value;
-		});
-		return JSON.stringify(obj, null, 2);
-	}
-
-	function exportAsDotNetJson(envName: string) {
-		const env = project.environments.find((e) => e.name === envName);
-		if (!env) return '{}';
-
-		const obj: Record<string, string> = {};
-		env.secrets.forEach((s) => {
-			const key = s.key.replace(/__/g, ':');
-			obj[key] = s.value;
-		});
-		return JSON.stringify(obj, null, 2);
+		return {
+			// Always end with a trailing newline — POSIX text file convention.
+			env: envLines.join('\n') + '\n',
+			json: JSON.stringify(jsonObj, null, 2),
+			dotnet: JSON.stringify(dotnetObj, null, 2)
+		};
 	}
 
 	function downloadFile(content: string, filename: string, mimeType = 'text/plain') {
@@ -135,6 +144,10 @@
 		document.body.removeChild(a);
 		// Revoke after a tick so the browser has time to start the download.
 		setTimeout(() => URL.revokeObjectURL(url), 100);
+	}
+
+	function slugTitle() {
+		return project.title.toLowerCase().replace(/\s+/g, '-');
 	}
 </script>
 
@@ -174,7 +187,7 @@
 		<Tabs bind:value={activeTab}>
 			<TabsList class="grid w-full grid-cols-5">
 				{#each EnvironmentType as env (env)}
-					{@const envData = project.environments.find((e) => e.name === env)}
+					{@const envData = envDataMap.get(env)}
 					<TabsTrigger value={env} class="capitalize">
 						{env}
 						{#if envData}
@@ -193,7 +206,7 @@
 			</TabsList>
 
 			{#each EnvironmentType as envName (envName)}
-				{@const envData = project.environments.find((e) => e.name === envName)}
+				{@const envData = envDataMap.get(envName)}
 				<TabsContent value={envName}>
 					<Card class="mt-4 shadow-xl">
 						<CardHeader class="flex flex-row items-center justify-between">
@@ -230,16 +243,11 @@
 								</div>
 
 								{#if envSubTab[envName] === 'secrets'}
+									{@const exports = buildExports(envName as Environment)}
 									<Button
 										variant="outline"
 										size="sm"
-										onclick={() => {
-											const content = exportAsEnv(envName);
-											downloadFile(
-												content,
-												`${project.title.toLowerCase().replace(/\s+/g, '-')}-${envName}.env`
-											);
-										}}
+										onclick={() => downloadFile(exports.env, `${slugTitle()}-${envName}.env`)}
 									>
 										<Download class="mr-2 h-4 w-4" />
 										.env
@@ -247,14 +255,12 @@
 									<Button
 										variant="outline"
 										size="sm"
-										onclick={() => {
-											const content = exportAsJson(envName);
+										onclick={() =>
 											downloadFile(
-												content,
-												`${project.title.toLowerCase().replace(/\s+/g, '-')}-${envName}.json`,
+												exports.json,
+												`${slugTitle()}-${envName}.json`,
 												'application/json'
-											);
-										}}
+											)}
 									>
 										<Download class="mr-2 h-4 w-4" />
 										JSON
@@ -262,14 +268,12 @@
 									<Button
 										variant="outline"
 										size="sm"
-										onclick={() => {
-											const content = exportAsDotNetJson(envName);
+										onclick={() =>
 											downloadFile(
-												content,
-												`${project.title.toLowerCase().replace(/\s+/g, '-')}-${envName}.appsettings.json`,
+												exports.dotnet,
+												`${slugTitle()}-${envName}.appsettings.json`,
 												'application/json'
-											);
-										}}
+											)}
 									>
 										<Download class="mr-2 h-4 w-4" />
 										.NET

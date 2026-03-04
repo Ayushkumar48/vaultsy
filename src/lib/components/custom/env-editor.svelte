@@ -27,26 +27,19 @@
 		production
 	}: Pick<Fields, 'development' | 'staging' | 'preview' | 'production'> = $props();
 
-	onMount(() => {
-		for (const env of EnvironmentType) {
-			const field = getField(env);
-			if ((field.value() ?? []).length === 0) {
-				field.set([{ key: '', value: '' }]);
-			}
-		}
-	});
+	// Use a computed map instead of a switch statement — O(1) lookup, no
+	// branching, and automatically stays in sync with the prop bindings.
+	const fieldMap = $derived(
+		new Map([
+			['development', development],
+			['staging', staging],
+			['preview', preview],
+			['production', production]
+		] as const)
+	);
 
 	function getField(env: Environment) {
-		switch (env) {
-			case 'development':
-				return development;
-			case 'staging':
-				return staging;
-			case 'preview':
-				return preview;
-			case 'production':
-				return production;
-		}
+		return fieldMap.get(env)!;
 	}
 
 	function getRows(env: Environment) {
@@ -56,9 +49,28 @@
 		}));
 	}
 
+	// Precompute invalid-key status for every env in one $derived pass so the
+	// TabsTrigger indicators never call getRows() more than once per update.
+	const invalidKeyEnvs = $derived(
+		new Set(
+			EnvironmentType.filter((env) =>
+				getRows(env).some((r) => r.key && getKeyError(r.key) !== null)
+			)
+		)
+	);
+
 	function hasInvalidKeys(env: Environment) {
-		return getRows(env).some((r) => r.key && getKeyError(r.key) !== null);
+		return invalidKeyEnvs.has(env);
 	}
+
+	onMount(() => {
+		for (const env of EnvironmentType) {
+			const field = getField(env);
+			if ((field.value() ?? []).length === 0) {
+				field.set([{ key: '', value: '' }]);
+			}
+		}
+	});
 
 	let visibleIndexes = $state<Record<string, boolean>>({});
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { SvelteMap } from 'svelte/reactivity';
 	import * as Card from '$lib/components/ui/card';
 	import { Button, buttonVariants } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -23,11 +24,16 @@
 
 	const cliCommand = 'vaultsy login --token <your-token>';
 	let copiedCli = $state(false);
+	let copiedCliTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async function copyCliCommand() {
 		await navigator.clipboard.writeText(cliCommand);
+		if (copiedCliTimer !== null) clearTimeout(copiedCliTimer);
 		copiedCli = true;
-		setTimeout(() => (copiedCli = false), 2000);
+		copiedCliTimer = setTimeout(() => {
+			copiedCli = false;
+			copiedCliTimer = null;
+		}, 2000);
 	}
 
 	const tokens = listApiTokens(undefined);
@@ -37,12 +43,17 @@
 
 	let newRawToken = $state<string | null>(null);
 	let copied = $state(false);
+	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
 	async function copyToken() {
 		if (!newRawToken) return;
 		await navigator.clipboard.writeText(newRawToken);
+		if (copiedTimer !== null) clearTimeout(copiedTimer);
 		copied = true;
-		setTimeout(() => (copied = false), 2000);
+		copiedTimer = setTimeout(() => {
+			copied = false;
+			copiedTimer = null;
+		}, 2000);
 	}
 
 	function dismissNewToken() {
@@ -76,20 +87,34 @@
 		{ value: '1y', label: '1 year' }
 	] as const;
 
+	// Memoize label lookups with a Map instead of .find() on every render.
+	const expiryLabelMap = new Map<string, string>(expiryOptions.map((o) => [o.value, o.label]));
 	function expiryLabel(value: string) {
-		return expiryOptions.find((o) => o.value === value)?.label ?? value;
+		return expiryLabelMap.get(value) ?? value;
 	}
 
-	function isExpired(expiresAt: Date | null) {
-		if (!expiresAt) return false;
-		return new Date(expiresAt) < new Date();
-	}
+	// Precompute expiry status for every token once per reactive update rather
+	// than calling new Date() twice per token per render cycle.
+	type TokenStatus = { expired: boolean; expiringSoon: boolean };
 
-	function isExpiringSoon(expiresAt: Date | null) {
-		if (!expiresAt) return false;
-		const diff = new Date(expiresAt).getTime() - Date.now();
-		return diff > 0 && diff < 7 * 24 * 60 * 60 * 1000;
-	}
+	const now = $derived(Date.now());
+
+	const tokenStatuses = $derived.by<SvelteMap<string, TokenStatus>>(() => {
+		const map = new SvelteMap<string, TokenStatus>();
+		for (const token of tokens.current ?? []) {
+			if (!token.expiresAt) {
+				map.set(token.id, { expired: false, expiringSoon: false });
+				continue;
+			}
+			const expiresMs = new Date(token.expiresAt).getTime();
+			const diff = expiresMs - now;
+			map.set(token.id, {
+				expired: diff <= 0,
+				expiringSoon: diff > 0 && diff < 7 * 24 * 60 * 60 * 1000
+			});
+		}
+		return map;
+	});
 </script>
 
 <div class="space-y-8">
@@ -228,8 +253,9 @@
 						{#if i > 0}
 							<Separator />
 						{/if}
-						{@const expired = isExpired(token.expiresAt)}
-						{@const expiringSoon = isExpiringSoon(token.expiresAt)}
+						{@const status = tokenStatuses.get(token.id) ?? { expired: false, expiringSoon: false }}
+						{@const expired = status.expired}
+						{@const expiringSoon = status.expiringSoon}
 						<li
 							class="flex items-center justify-between gap-4 px-6 py-4 {expired
 								? 'opacity-60'

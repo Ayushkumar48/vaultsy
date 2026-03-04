@@ -38,15 +38,22 @@
 
 	let rollingBack = $state<string | null>(null);
 
+	// Re-run whenever environmentId changes — the explicit read of environmentId
+	// inside the effect body is what makes Svelte track it as a dependency.
 	$effect(() => {
-		loadHistory();
+		const id = environmentId; // explicit read so the effect re-runs on change
+		loadHistory(id);
 	});
 
-	async function loadHistory() {
+	async function loadHistory(id: string = environmentId) {
 		loading = true;
 		error = null;
+		// Reset diff state when reloading so stale diffs aren't shown.
+		diffOpen = null;
+		diffResult = null;
+		diffError = null;
 		try {
-			history = await getEnvironmentHistory({ environmentId });
+			history = await getEnvironmentHistory({ environmentId: id });
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load history';
 		} finally {
@@ -97,6 +104,8 @@
 	}
 
 	async function handleRollback(versionId: string) {
+		// Prevent double-trigger if already rolling back this version.
+		if (rollingBack === versionId) return;
 		rollingBack = versionId;
 		try {
 			await onRollback(versionId);
@@ -106,30 +115,22 @@
 		}
 	}
 
-	const diffTypeLabel: Record<DiffEntry['type'], string> = {
-		added: 'added',
-		removed: 'removed',
-		modified: 'modified',
-		unchanged: 'unchanged'
+	// Merge all three per-type lookup tables into one to halve the number of
+	// Map lookups per rendered diff entry.
+	type DiffMeta = {
+		label: string;
+		badge: 'default' | 'secondary' | 'destructive' | 'outline';
+		symbol: string;
 	};
 
-	const diffTypeBadge: Record<
-		DiffEntry['type'],
-		'default' | 'secondary' | 'destructive' | 'outline'
-	> = {
-		added: 'default',
-		modified: 'secondary',
-		removed: 'destructive',
-		unchanged: 'outline'
+	const diffTypeMeta: Record<DiffEntry['type'], DiffMeta> = {
+		added: { label: 'added', badge: 'default', symbol: '+' },
+		modified: { label: 'modified', badge: 'secondary', symbol: '~' },
+		removed: { label: 'removed', badge: 'destructive', symbol: '-' },
+		unchanged: { label: 'unchanged', badge: 'outline', symbol: ' ' }
 	};
 
-	const diffTypeSymbol: Record<DiffEntry['type'], string> = {
-		added: '+',
-		modified: '~',
-		removed: '-',
-		unchanged: ' '
-	};
-
+	// Only show meaningful changes in the diff panel — skip unchanged entries.
 	function visibleDiff(diff: DiffEntry[]) {
 		return diff.filter((d) => d.type !== 'unchanged');
 	}
@@ -137,7 +138,7 @@
 
 <div class="space-y-1">
 	{#if loading}
-		<div class="flex items-center justify-center py-12 text-muted-foreground">
+		<div class="flex items-center justify-center gap-2 py-12 text-muted-foreground">
 			<Spinner />
 			Loading history…
 		</div>
@@ -297,12 +298,13 @@
 											</p>
 											<ul class="space-y-1 font-mono text-xs">
 												{#each changed as d (d.key)}
+													{@const meta = diffTypeMeta[d.type]}
 													<li class="flex items-center gap-2">
 														<Badge
-															variant={diffTypeBadge[d.type]}
+															variant={meta.badge}
 															class="w-16 shrink-0 justify-center py-0 text-[10px]"
 														>
-															{diffTypeLabel[d.type]}
+															{meta.label}
 														</Badge>
 														<span
 															class="flex items-center gap-1 {d.type === 'added'
@@ -313,7 +315,7 @@
 																		? 'text-yellow-600 dark:text-yellow-400'
 																		: ''}"
 														>
-															<span class="opacity-60">{diffTypeSymbol[d.type]}</span>
+															<span class="opacity-60">{meta.symbol}</span>
 															{d.key}
 														</span>
 													</li>

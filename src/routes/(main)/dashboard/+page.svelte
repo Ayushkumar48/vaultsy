@@ -17,10 +17,16 @@
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 
 	const user = page.data.user;
-	const recentProjects = getProjectNames({ limit: 5 });
+
+	// A single subscription covers all stats + the recent list.
+	// Using limit:5 for the sidebar fetch and a separate unlimited one caused
+	// two round-trips. Instead we fetch everything once and slice in JS.
 	const allProjects = getProjectNames();
 
+	const recentProjects = $derived(allProjects.current?.slice(0, 5) ?? []);
+
 	const totalCount = $derived(allProjects.current?.length ?? 0);
+
 	const recentCount = $derived(
 		(allProjects.current ?? []).filter((p) => {
 			const diff = Date.now() - new Date(p.updatedAt).getTime();
@@ -28,12 +34,16 @@
 		}).length
 	);
 
-	const greeting = $derived(() => {
-		const hour = new Date().getHours();
-		if (hour < 12) return 'Good morning';
-		if (hour < 18) return 'Good afternoon';
-		return 'Good evening';
-	});
+	// $derived — not $derived(() => fn()) — so the value is the string itself,
+	// not a function that returns a string.
+	const greeting = $derived(
+		(() => {
+			const hour = new Date().getHours();
+			if (hour < 12) return 'Good morning';
+			if (hour < 18) return 'Good afternoon';
+			return 'Good evening';
+		})()
+	);
 </script>
 
 <div class="space-y-8">
@@ -42,7 +52,7 @@
 		<div class="flex items-center gap-2">
 			<span class="text-2xl">👋</span>
 			<h1 class="text-2xl font-bold tracking-tight">
-				{greeting()}, {user?.name?.split(' ')[0] ?? 'there'}
+				{greeting}, {user?.name?.split(' ')[0] ?? 'there'}
 			</h1>
 		</div>
 		<p class="text-muted-foreground">
@@ -123,7 +133,7 @@
 				</Button>
 			</Card.Header>
 			<Card.Content class="space-y-1 pb-4">
-				{#if recentProjects.loading}
+				{#if allProjects.loading}
 					{#each Array(4) as _, i (i)}
 						<div class="flex items-center gap-3 rounded-lg px-3 py-2.5">
 							<div class="h-8 w-8 animate-pulse rounded-md bg-muted"></div>
@@ -133,11 +143,11 @@
 							</div>
 						</div>
 					{/each}
-				{:else if recentProjects.error}
+				{:else if allProjects.error}
 					<p class="px-3 py-6 text-center text-sm text-muted-foreground">
 						Failed to load projects.
 					</p>
-				{:else if !recentProjects.current || recentProjects.current.length === 0}
+				{:else if recentProjects.length === 0}
 					<div class="flex flex-col items-center justify-center gap-3 py-10 text-center">
 						<div
 							class="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground"
@@ -154,7 +164,7 @@
 						</Button>
 					</div>
 				{:else}
-					{#each recentProjects.current as project (project.id)}
+					{#each recentProjects as project (project.id)}
 						<button
 							class="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-muted/60"
 							onclick={() => goto(resolve(`/dashboard/projects/${project.id}`))}
