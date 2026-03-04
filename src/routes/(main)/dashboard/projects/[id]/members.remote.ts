@@ -31,24 +31,41 @@ export const listMembers = query(
 		// Verify the caller has at least read access to this project
 		await resolveProject(projectId, session.user.id);
 
-		// Fetch the owner
-		const project = await db.query.projects.findFirst({
-			where: eq(projects.id, projectId),
-			columns: { userId: true },
-			with: {
-				members: {
-					with: {
-						user: {
-							columns: { id: true, name: true, email: true, image: true }
+		// Fetch project+members and pending invitations in parallel
+		const [project, invitations] = await Promise.all([
+			db.query.projects.findFirst({
+				where: eq(projects.id, projectId),
+				columns: { userId: true },
+				with: {
+					members: {
+						with: {
+							user: {
+								columns: { id: true, name: true, email: true, image: true }
+							}
 						}
 					}
 				}
-			}
-		});
+			}),
+			db.query.projectInvitations.findMany({
+				where: and(
+					eq(projectInvitations.projectId, projectId),
+					eq(projectInvitations.status, 'pending')
+				),
+				columns: {
+					id: true,
+					invitedEmail: true,
+					role: true,
+					expiresAt: true,
+					createdAt: true
+				},
+				orderBy: (t, { desc }) => [desc(t.createdAt)]
+			})
+		]);
 
 		if (!project) error(404, 'Project not found');
 
-		// Fetch owner user record
+		// Fetch owner user record (can't avoid this separate lookup since owner
+		// isn't guaranteed to have a projectMembers row)
 		const ownerRecord = await db.query.user.findFirst({
 			where: eq(user.id, project.userId),
 			columns: { id: true, name: true, email: true, image: true }
@@ -79,22 +96,6 @@ export const listMembers = query(
 				joinedAt: m.createdAt
 			}))
 		];
-
-		// Fetch pending invitations
-		const invitations = await db.query.projectInvitations.findMany({
-			where: and(
-				eq(projectInvitations.projectId, projectId),
-				eq(projectInvitations.status, 'pending')
-			),
-			columns: {
-				id: true,
-				invitedEmail: true,
-				role: true,
-				expiresAt: true,
-				createdAt: true
-			},
-			orderBy: (t, { desc }) => [desc(t.createdAt)]
-		});
 
 		const callerIsOwner = project.userId === session.user.id;
 		const callerMembership = project.members.find((m) => m.user.id === session.user.id);
@@ -133,11 +134,25 @@ export const inviteMember = form(InviteMemberSchema, async ({ projectId, email, 
 		error(400, 'You cannot invite yourself.');
 	}
 
-	// Check if the target user is already a member
-	const targetUser = await db.query.user.findFirst({
-		where: eq(user.email, normalizedEmail),
-		columns: { id: true }
-	});
+	// Check if the target user is already a member and if a pending invite exists — in parallel
+	const [targetUser, existingInvite] = await Promise.all([
+		db.query.user.findFirst({
+			where: eq(user.email, normalizedEmail),
+			columns: { id: true }
+		}),
+		db.query.projectInvitations.findFirst({
+			where: and(
+				eq(projectInvitations.projectId, projectId),
+				eq(projectInvitations.invitedEmail, normalizedEmail),
+				eq(projectInvitations.status, 'pending')
+			),
+			columns: { id: true }
+		})
+	]);
+
+	if (existingInvite) {
+		error(400, 'A pending invitation already exists for this email.');
+	}
 
 	if (targetUser) {
 		// Owner can't be re-invited
@@ -146,7 +161,8 @@ export const inviteMember = form(InviteMemberSchema, async ({ projectId, email, 
 		}
 
 		const existingMember = await db.query.projectMembers.findFirst({
-			where: and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, targetUser.id))
+			where: and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, targetUser.id)),
+			columns: { id: true }
 		});
 
 		if (existingMember) {
@@ -154,44 +170,26 @@ export const inviteMember = form(InviteMemberSchema, async ({ projectId, email, 
 		}
 	}
 
-	// Check for an existing pending invitation
-	const existingInvite = await db.query.projectInvitations.findFirst({
-		where: and(
-			eq(projectInvitations.projectId, projectId),
-			eq(projectInvitations.invitedEmail, normalizedEmail),
-			eq(projectInvitations.status, 'pending')
-		)
-	});
-
-	if (existingInvite) {
-		error(400, 'A pending invitation already exists for this email.');
-	}
-
 	const { raw, hashed } = await generateApiToken();
 	const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-	await db.insert(projectInvitations).values({
-		id: generateId(),
-		projectId,
-		invitedEmail: normalizedEmail,
-		role,
-		hashedToken: hashed,
-		status: 'pending',
-		invitedBy: session.user.id,
-		expiresAt
-	});
+	// Use returning() to get the inserted id in a single round-trip instead of
+	// inserting and then re-querying.
+	const [inserted] = await db
+		.insert(projectInvitations)
+		.values({
+			id: generateId(),
+			projectId,
+			invitedEmail: normalizedEmail,
+			role,
+			hashedToken: hashed,
+			status: 'pending',
+			invitedBy: session.user.id,
+			expiresAt
+		})
+		.returning({ id: projectInvitations.id });
 
 	await listMembers({ projectId }).refresh();
-
-	// Re-query to get the id of the invitation we just inserted
-	const inserted = await db.query.projectInvitations.findFirst({
-		where: and(
-			eq(projectInvitations.projectId, projectId),
-			eq(projectInvitations.invitedEmail, normalizedEmail),
-			eq(projectInvitations.status, 'pending')
-		),
-		columns: { id: true }
-	});
 
 	// Return the raw token and invitation id so the UI can key the link cache
 	return { inviteToken: raw, invitationId: inserted?.id ?? null };
@@ -213,16 +211,15 @@ export const updateMemberRole = command(
 		// Only the project owner can change roles
 		await resolveProjectOwner(projectId, session.user.id);
 
-		const membership = await db.query.projectMembers.findFirst({
-			where: and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId))
-		});
-
-		if (!membership) error(404, 'Member not found.');
-
-		await db
+		// Use returning() so we skip the pre-check SELECT and instead detect
+		// a missing member from the empty result set.
+		const updated = await db
 			.update(projectMembers)
 			.set({ role })
-			.where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)));
+			.where(and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)))
+			.returning({ id: projectMembers.id });
+
+		if (updated.length === 0) error(404, 'Member not found.');
 
 		await listMembers({ projectId }).refresh();
 	}
@@ -256,7 +253,8 @@ export const removeMember = command(RemoveMemberSchema, async ({ projectId, user
 	} else if (callerRole === 'admin') {
 		// Admins can only remove viewers — look up the target member's role
 		const targetMembership = await db.query.projectMembers.findFirst({
-			where: and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId))
+			where: and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId)),
+			columns: { id: true, role: true }
 		});
 		if (!targetMembership) error(404, 'Member not found.');
 		if (targetMembership.role !== 'viewer') {

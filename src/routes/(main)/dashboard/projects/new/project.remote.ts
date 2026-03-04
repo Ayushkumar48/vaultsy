@@ -177,35 +177,29 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 	// Viewers cannot update projects — only owner and admin
 	const resolvedProject = await resolveProjectWithWriteAccess(projectId, session.user.id);
 
+	// resolvedProject already holds the full project row — no need to re-fetch
+	// it inside the transaction. Guard the rename permission before entering the
+	// transaction so we can bail out early without holding a DB connection.
+	const dek = await decryptDek(resolvedProject.encryptedDek);
+	const titleChanged = title.trim() !== resolvedProject.title;
+	if (titleChanged && resolvedProject.role !== 'owner') {
+		error(403, { message: 'Forbidden — only the project owner can rename the project.' });
+	}
+
 	await db.transaction(async (tx) => {
-		const existingProject = await tx.query.projects.findFirst({
-			where: eq(projects.id, projectId)
-		});
-
-		if (!existingProject) error(404, 'Project not found');
-
-		const dek = await decryptDek(resolvedProject.encryptedDek);
-
-		// Only owner can rename the project
-		const titleChanged = title.trim() !== existingProject.title;
-		if (titleChanged && resolvedProject.role !== 'owner') {
-			error(403, { message: 'Forbidden — only the project owner can rename the project.' });
-		}
-
-		await tx
-			.update(projects)
-			.set({
-				title: title.trim(),
-				updatedAt: new Date()
-			})
-			.where(eq(projects.id, projectId));
-
-		const existingEnvs = await tx.query.environments.findMany({
-			where: eq(environments.projectId, projectId)
-		});
+		// Kick off the title update and the environment/secret fetches in parallel
+		// since they don't depend on each other.
+		const [existingEnvs] = await Promise.all([
+			tx.query.environments.findMany({
+				where: eq(environments.projectId, projectId)
+			}),
+			tx
+				.update(projects)
+				.set({ title: title.trim(), updatedAt: new Date() })
+				.where(eq(projects.id, projectId))
+		]);
 
 		const envMap = new Map(existingEnvs.map((env) => [env.name, env]));
-
 		const envIds = existingEnvs.map((env) => env.id);
 
 		const allSecrets = envIds.length
@@ -215,9 +209,9 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 			: [];
 
 		const secretMap = new Map(allSecrets.map((s) => [`${s.environmentId}:${s.key}`, s]));
-
 		const secretIds = allSecrets.map((s) => s.id);
 
+		// Load the highest version number for every existing secret in one query
 		const latestVersionRows = secretIds.length
 			? await tx
 					.select({
@@ -231,76 +225,112 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 
 		const latestVersionMap = new Map(latestVersionRows.map((r) => [r.secretId, r.version ?? 0]));
 
-		const newSecretRecords: (typeof secrets.$inferInsert)[] = [];
-		const newVersionRecords: (typeof secretVersions.$inferInsert)[] = [];
-		const secretIdsToDelete: string[] = [];
-		const secretsToTouch: string[] = [];
-
+		// Identify which existing secrets need their current encrypted value fetched
+		// so we can compare against the submitted plaintext.  We collect all the
+		// (secretId, version) pairs first and batch them in a single query.
 		const submittedSecretKeys = new Set<string>();
+		// Track which existing secrets are referenced by the submission
+		const candidateIds: string[] = [];
 
 		for (const envName of EnvironmentType) {
 			const env = envMap.get(envName);
 			if (!env) continue;
-
 			const envRows = data[envName];
+			if (!envRows) continue;
+			for (const row of envRows) {
+				if (!row.key || !row.value) continue;
+				const compositeKey = `${env.id}:${row.key}`;
+				submittedSecretKeys.add(compositeKey);
+				const existingSecret = secretMap.get(compositeKey);
+				if (existingSecret && latestVersionMap.has(existingSecret.id)) {
+					candidateIds.push(existingSecret.id);
+				}
+			}
+		}
 
+		// Fetch the latest encrypted value for all candidate secrets in one query
+		// using a self-join / MAX subquery approach via the already-computed version map.
+		// We pull every (secretId, version, encryptedValue) that matches a latest row.
+		const latestValueRows: { secretId: string; encryptedValue: string }[] = candidateIds.length
+			? await tx
+					.select({
+						secretId: secretVersions.secretId,
+						encryptedValue: secretVersions.encryptedValue
+					})
+					.from(secretVersions)
+					.where(
+						and(
+							inArray(secretVersions.secretId, candidateIds),
+							sql`(${secretVersions.secretId}, ${secretVersions.version}) IN (${sql.join(
+								candidateIds.map((id) => {
+									const v = latestVersionMap.get(id) ?? 0;
+									return sql`(${id}, ${v})`;
+								}),
+								sql`, `
+							)})`
+						)
+					)
+			: [];
+
+		const latestEncryptedMap = new Map(latestValueRows.map((r) => [r.secretId, r.encryptedValue]));
+
+		// Decrypt all existing latest values in parallel so we can compare them
+		// without any further per-secret awaits in the hot loop below.
+		const decryptedCurrentMap = new Map(
+			await Promise.all(
+				[...latestEncryptedMap.entries()].map(
+					async ([id, enc]) => [id, await decryptSecret(dek, enc)] as const
+				)
+			)
+		);
+
+		const newSecretRecords: (typeof secrets.$inferInsert)[] = [];
+		const newVersionRecords: (typeof secretVersions.$inferInsert)[] = [];
+		const secretIdsToDelete: string[] = [];
+		const secretsToTouch: string[] = [];
+		const changedEnvIds = new Set<string>();
+
+		// Collect new secrets whose values need encrypting, then batch-encrypt
+		// them in parallel after the loop.
+		const toEncryptNewValues: { secretId: string; envId: string; key: string; value: string }[] =
+			[];
+		const toEncryptModified: {
+			secretId: string;
+			currentVersion: number;
+			value: string;
+		}[] = [];
+
+		for (const envName of EnvironmentType) {
+			const env = envMap.get(envName);
+			if (!env) continue;
+			const envRows = data[envName];
 			if (!envRows) continue;
 
 			for (const row of envRows) {
 				if (!row.key || !row.value) continue;
 
 				const compositeKey = `${env.id}:${row.key}`;
-				submittedSecretKeys.add(compositeKey);
-
 				const existingSecret = secretMap.get(compositeKey);
 
 				if (existingSecret) {
 					const currentVersion = latestVersionMap.get(existingSecret.id);
-
 					if (currentVersion !== undefined) {
-						const [latestVersion] = await tx
-							.select({
-								encryptedValue: secretVersions.encryptedValue
-							})
-							.from(secretVersions)
-							.where(
-								and(
-									eq(secretVersions.secretId, existingSecret.id),
-									eq(secretVersions.version, currentVersion)
-								)
-							)
-							.limit(1);
-
-						if (latestVersion) {
-							const storedPlaintext = await decryptSecret(dek, latestVersion.encryptedValue);
-
-							if (storedPlaintext !== row.value) {
-								newVersionRecords.push({
-									id: generateId(),
-									secretId: existingSecret.id,
-									encryptedValue: await encryptSecret(dek, row.value),
-									version: currentVersion + 1
-								});
-
-								secretsToTouch.push(existingSecret.id);
-							}
+						const storedPlaintext = decryptedCurrentMap.get(existingSecret.id);
+						if (storedPlaintext !== undefined && storedPlaintext !== row.value) {
+							toEncryptModified.push({
+								secretId: existingSecret.id,
+								currentVersion,
+								value: row.value
+							});
+							secretsToTouch.push(existingSecret.id);
+							changedEnvIds.add(env.id);
 						}
 					}
 				} else {
 					const secretId = generateId();
-
-					newSecretRecords.push({
-						id: secretId,
-						key: row.key,
-						environmentId: env.id
-					});
-
-					newVersionRecords.push({
-						id: generateId(),
-						secretId,
-						encryptedValue: await encryptSecret(dek, row.value),
-						version: 1
-					});
+					newSecretRecords.push({ id: secretId, key: row.key, environmentId: env.id });
+					toEncryptNewValues.push({ secretId, envId: env.id, key: row.key, value: row.value });
+					changedEnvIds.add(env.id);
 				}
 			}
 		}
@@ -309,7 +339,32 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 			const compositeKey = `${s.environmentId}:${s.key}`;
 			if (!submittedSecretKeys.has(compositeKey)) {
 				secretIdsToDelete.push(s.id);
+				changedEnvIds.add(s.environmentId);
 			}
+		}
+
+		// Encrypt all new and modified values in parallel
+		const [encryptedNew, encryptedModified] = await Promise.all([
+			Promise.all(toEncryptNewValues.map((e) => encryptSecret(dek, e.value))),
+			Promise.all(toEncryptModified.map((e) => encryptSecret(dek, e.value)))
+		]);
+
+		for (let i = 0; i < toEncryptNewValues.length; i++) {
+			newVersionRecords.push({
+				id: generateId(),
+				secretId: toEncryptNewValues[i].secretId,
+				encryptedValue: encryptedNew[i],
+				version: 1
+			});
+		}
+
+		for (let i = 0; i < toEncryptModified.length; i++) {
+			newVersionRecords.push({
+				id: generateId(),
+				secretId: toEncryptModified[i].secretId,
+				encryptedValue: encryptedModified[i],
+				version: toEncryptModified[i].currentVersion + 1
+			});
 		}
 
 		if (newSecretRecords.length) {
@@ -329,20 +384,6 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 				.update(secrets)
 				.set({ updatedAt: new Date() })
 				.where(inArray(secrets.id, secretsToTouch));
-		}
-		const changedEnvIds = new Set<string>();
-		for (const r of [...newSecretRecords, ...newVersionRecords]) {
-			if ('environmentId' in r) {
-				changedEnvIds.add(r.environmentId as string);
-			}
-		}
-		for (const secretId of secretsToTouch) {
-			const s = allSecrets.find((x) => x.id === secretId);
-			if (s) changedEnvIds.add(s.environmentId);
-		}
-		for (const secretId of secretIdsToDelete) {
-			const s = allSecrets.find((x) => x.id === secretId);
-			if (s) changedEnvIds.add(s.environmentId);
 		}
 
 		for (const envId of changedEnvIds) {
@@ -524,15 +565,19 @@ export const rollbackToVersion = command(RollbackSchema, async ({ versionId }) =
 
 	if (!targetVersion) error(404, 'Version not found');
 
-	// Viewers cannot roll back — only owner and admin
+	// Viewers cannot roll back — only owner and admin.
+	// resolveProjectWithWriteAccess re-fetches the project, but we already have
+	// the encryptedDek from the relation above — use resolvedProject for the DEK
+	// and keep the project.id reference from the already-loaded relation.
 	const resolvedProject = await resolveProjectWithWriteAccess(
 		targetVersion.environment.project.id,
 		session.user.id
 	);
 
-	const project = targetVersion.environment.project;
+	const projectId = targetVersion.environment.project.id;
 	const dek = await decryptDek(resolvedProject.encryptedDek);
 
+	// Decrypt all snapshot values in parallel up front
 	const plaintextSecrets = await Promise.all(
 		targetVersion.secrets.map(async (s) => ({
 			key: s.key,
@@ -546,11 +591,15 @@ export const rollbackToVersion = command(RollbackSchema, async ({ versionId }) =
 		const existingSecrets = await tx.query.secrets.findMany({
 			where: eq(secrets.environmentId, environmentId)
 		});
+
 		const existingMap = new Map(existingSecrets.map((s) => [s.key, s]));
-		const rollbackSecretIds = new Set(plaintextSecrets.map((p) => p.key));
+		const rollbackKeys = new Set(plaintextSecrets.map((p) => p.key));
+
 		const toInsertSecrets: (typeof secrets.$inferInsert)[] = [];
 		const toInsertVersions: (typeof secretVersions.$inferInsert)[] = [];
 		const toDeleteSecretIds: string[] = [];
+
+		// Load the max version for every existing secret in one query
 		const latestVersionRows = existingSecrets.length
 			? await tx
 					.select({
@@ -569,48 +618,90 @@ export const rollbackToVersion = command(RollbackSchema, async ({ versionId }) =
 
 		const latestVersionMap = new Map(latestVersionRows.map((r) => [r.secretId, r.version ?? 0]));
 
+		// Fetch the latest encrypted value for all existing secrets whose key
+		// appears in the rollback snapshot in a single batched query, then
+		// decrypt them all in parallel — eliminating the per-secret query loop.
+		const existingCandidates = existingSecrets.filter((s) => rollbackKeys.has(s.key));
+		const latestValueRows: { secretId: string; encryptedValue: string }[] =
+			existingCandidates.length
+				? await tx
+						.select({
+							secretId: secretVersions.secretId,
+							encryptedValue: secretVersions.encryptedValue
+						})
+						.from(secretVersions)
+						.where(
+							and(
+								inArray(
+									secretVersions.secretId,
+									existingCandidates.map((s) => s.id)
+								),
+								sql`(${secretVersions.secretId}, ${secretVersions.version}) IN (${sql.join(
+									existingCandidates.map((s) => {
+										const v = latestVersionMap.get(s.id) ?? 0;
+										return sql`(${s.id}, ${v})`;
+									}),
+									sql`, `
+								)})`
+							)
+						)
+				: [];
+
+		const decryptedCurrentMap = new Map(
+			await Promise.all(
+				latestValueRows.map(
+					async (r) => [r.secretId, await decryptSecret(dek, r.encryptedValue)] as const
+				)
+			)
+		);
+
+		// Collect new/modified values that need encrypting, then batch-encrypt
+		const toEncryptNew: { key: string; value: string }[] = [];
+		const toEncryptModified: { secretId: string; currentVersion: number; value: string }[] = [];
+
 		for (const { key, value } of plaintextSecrets) {
 			const existing = existingMap.get(key);
 			if (!existing) {
-				const secretId = generateId();
-				toInsertSecrets.push({ id: secretId, key, environmentId });
-				toInsertVersions.push({
-					id: generateId(),
-					secretId,
-					encryptedValue: await encryptSecret(dek, value),
-					version: 1
-				});
+				toEncryptNew.push({ key, value });
 			} else {
 				const currentVersion = latestVersionMap.get(existing.id) ?? 0;
-				const [latestRow] = await tx
-					.select({ encryptedValue: secretVersions.encryptedValue })
-					.from(secretVersions)
-					.where(
-						and(
-							eq(secretVersions.secretId, existing.id),
-							eq(secretVersions.version, currentVersion)
-						)
-					)
-					.limit(1);
-
-				if (latestRow) {
-					const storedPlain = await decryptSecret(dek, latestRow.encryptedValue);
-					if (storedPlain !== value) {
-						toInsertVersions.push({
-							id: generateId(),
-							secretId: existing.id,
-							encryptedValue: await encryptSecret(dek, value),
-							version: currentVersion + 1
-						});
-					}
+				const storedPlain = decryptedCurrentMap.get(existing.id);
+				if (storedPlain !== undefined && storedPlain !== value) {
+					toEncryptModified.push({ secretId: existing.id, currentVersion, value });
 				}
 			}
 		}
 
 		for (const s of existingSecrets) {
-			if (!rollbackSecretIds.has(s.key)) {
+			if (!rollbackKeys.has(s.key)) {
 				toDeleteSecretIds.push(s.id);
 			}
+		}
+
+		// Encrypt all changed values in parallel
+		const [encryptedNew, encryptedModified] = await Promise.all([
+			Promise.all(toEncryptNew.map((e) => encryptSecret(dek, e.value))),
+			Promise.all(toEncryptModified.map((e) => encryptSecret(dek, e.value)))
+		]);
+
+		for (let i = 0; i < toEncryptNew.length; i++) {
+			const secretId = generateId();
+			toInsertSecrets.push({ id: secretId, key: toEncryptNew[i].key, environmentId });
+			toInsertVersions.push({
+				id: generateId(),
+				secretId,
+				encryptedValue: encryptedNew[i],
+				version: 1
+			});
+		}
+
+		for (let i = 0; i < toEncryptModified.length; i++) {
+			toInsertVersions.push({
+				id: generateId(),
+				secretId: toEncryptModified[i].secretId,
+				encryptedValue: encryptedModified[i],
+				version: toEncryptModified[i].currentVersion + 1
+			});
 		}
 
 		if (toInsertSecrets.length) await tx.insert(secrets).values(toInsertSecrets);
@@ -618,7 +709,8 @@ export const rollbackToVersion = command(RollbackSchema, async ({ versionId }) =
 		if (toDeleteSecretIds.length) {
 			await tx.delete(secrets).where(inArray(secrets.id, toDeleteSecretIds));
 		}
-		await tx.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, project.id));
+
+		await tx.update(projects).set({ updatedAt: new Date() }).where(eq(projects.id, projectId));
 		await snapshotEnvironment(tx as unknown as Tx, environmentId, session.user.id);
 	});
 

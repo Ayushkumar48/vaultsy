@@ -2,7 +2,7 @@ import { query } from '$app/server';
 import { db } from '$lib/server/db';
 import { projects, projectMembers } from '$lib/server/db/schema';
 import { GetProjectSchemaFilters } from '$lib/shared/schema';
-import { isNull, desc, and, ilike, gte, lte, eq, or, inArray } from 'drizzle-orm';
+import { isNull, desc, and, ilike, gte, lte, sql } from 'drizzle-orm';
 import { getRequestEvent } from '$app/server';
 import { auth } from '$lib/server/auth';
 
@@ -15,22 +15,9 @@ export const getProjectNames = query(GetProjectSchemaFilters, async (filters) =>
 
 	const userId = session.user.id;
 
-	// Find all project IDs the user is a collaborator on (non-owner member)
-	const memberRows = await db
-		.select({ projectId: projectMembers.projectId })
-		.from(projectMembers)
-		.where(eq(projectMembers.userId, userId));
-
-	const memberProjectIds = memberRows.map((r) => r.projectId);
-
-	// Build conditions: own projects OR member projects
-	const ownerCondition = eq(projects.userId, userId);
-	const memberCondition =
-		memberProjectIds.length > 0 ? inArray(projects.id, memberProjectIds) : undefined;
-
-	const accessCondition = memberCondition ? or(ownerCondition, memberCondition) : ownerCondition;
-
-	const conditions = [isNull(projects.deletedAt), accessCondition];
+	// Single query: owner's projects UNION member's projects via a lateral join.
+	// We use a raw SQL EXISTS + CASE to determine ownership in one round-trip.
+	const conditions = [isNull(projects.deletedAt)];
 
 	if (filters?.title) {
 		conditions.push(ilike(projects.title, `%${filters.title}%`));
@@ -42,12 +29,23 @@ export const getProjectNames = query(GetProjectSchemaFilters, async (filters) =>
 		conditions.push(lte(projects.updatedAt, new Date(filters.updatedBefore)));
 	}
 
+	// Access condition: user is the owner OR there is a membership row for them.
+	conditions.push(
+		sql`(${projects.userId} = ${userId} OR EXISTS (
+			SELECT 1 FROM ${projectMembers}
+			WHERE ${projectMembers.projectId} = ${projects.id}
+			  AND ${projectMembers.userId} = ${userId}
+		))`
+	);
+
 	const baseQuery = db
 		.select({
 			id: projects.id,
 			title: projects.title,
 			updatedAt: projects.updatedAt,
-			ownerId: projects.userId
+			ownerId: projects.userId,
+			// Derive isOwner in the DB so we don't need a second pass in JS.
+			isOwner: sql<boolean>`(${projects.userId} = ${userId})`
 		})
 		.from(projects)
 		.where(and(...conditions))
@@ -55,9 +53,5 @@ export const getProjectNames = query(GetProjectSchemaFilters, async (filters) =>
 
 	const rows = filters?.limit ? await baseQuery.limit(filters.limit) : await baseQuery;
 
-	// Annotate each row with whether this user is the owner or a collaborator
-	return rows.map((r) => ({
-		...r,
-		isOwner: r.ownerId === userId
-	}));
+	return rows;
 });

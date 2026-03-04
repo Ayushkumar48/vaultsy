@@ -25,12 +25,22 @@ export function assertValidEnv(env: string): Environment {
  * Resolves a project by id, verifying that the user is either the owner
  * or an active member of the project.
  *
+ * Performs a single LEFT JOIN across projects + projectMembers instead of
+ * two serial round-trips.
+ *
  * Throws 404 if not found, 403 if the user has no access at all.
  * Returns the project row along with the resolved role of the requesting user.
  */
 export async function resolveProject(projectId: string, userId: string) {
+	// Single query: fetch the project and, if the user is a member, their membership row.
 	const project = await db.query.projects.findFirst({
-		where: and(eq(projects.id, projectId), isNull(projects.deletedAt))
+		where: and(eq(projects.id, projectId), isNull(projects.deletedAt)),
+		with: {
+			members: {
+				where: eq(projectMembers.userId, userId),
+				limit: 1
+			}
+		}
 	});
 
 	if (!project) {
@@ -39,19 +49,17 @@ export async function resolveProject(projectId: string, userId: string) {
 
 	// Owner always has full access
 	if (project.userId === userId) {
-		return { ...project, role: 'owner' as MemberRoleType };
+		const { members: _members, ...rest } = project;
+		return { ...rest, role: 'owner' as MemberRoleType };
 	}
 
-	// Check project_members table for collaborator access
-	const membership = await db.query.projectMembers.findFirst({
-		where: and(eq(projectMembers.projectId, projectId), eq(projectMembers.userId, userId))
-	});
-
+	const membership = project.members[0];
 	if (!membership) {
 		error(403, { message: 'Forbidden — this project does not belong to you.' });
 	}
 
-	return { ...project, role: membership.role as MemberRoleType };
+	const { members: _members, ...rest } = project;
+	return { ...rest, role: membership.role as MemberRoleType };
 }
 
 /**

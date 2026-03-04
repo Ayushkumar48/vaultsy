@@ -42,6 +42,7 @@ export async function GET({ locals, params }) {
 		}
 	});
 
+	// Decrypt all values in parallel
 	const decrypted = await Promise.all(
 		envSecrets.map(async (s) => ({
 			key: s.key,
@@ -126,7 +127,7 @@ export async function POST({ locals, params, request }) {
 		const secretMap = new Map(existingSecrets.map((s) => [s.key, s]));
 		const secretIds = existingSecrets.map((s) => s.id);
 
-		// Load latest versions for all existing secrets
+		// Load the max version number for every existing secret in one query
 		const latestVersionRows = secretIds.length
 			? await tx
 					.select({
@@ -140,71 +141,119 @@ export async function POST({ locals, params, request }) {
 
 		const latestVersionMap = new Map(latestVersionRows.map((r) => [r.secretId, r.version ?? 0]));
 
-		const newSecretRecords: (typeof secrets.$inferInsert)[] = [];
-		const newVersionRecords: (typeof secretVersions.$inferInsert)[] = [];
-		const secretIdsToDelete: string[] = [];
-		const secretsToTouch: string[] = [];
-		const submittedKeys = new Set<string>();
+		// Identify which existing secrets are referenced by the submission so we
+		// can batch-fetch their latest encrypted values in a single query.
+		const submittedKeys = new Set(rows.map((r) => r.key));
+		const candidateSecrets = existingSecrets.filter((s) => submittedKeys.has(s.key));
 
-		for (const row of rows) {
-			submittedKeys.add(row.key);
-			const existing = secretMap.get(row.key);
-
-			if (existing) {
-				// Secret already exists — check if value changed
-				const currentVersion = latestVersionMap.get(existing.id) ?? 0;
-				const [latestVersion] = await tx
-					.select({ encryptedValue: secretVersions.encryptedValue })
+		// Batch-fetch the latest encrypted value for all candidate secrets using
+		// a (secretId, version) pair filter — one round-trip instead of N.
+		const latestValueRows: { secretId: string; encryptedValue: string }[] = candidateSecrets.length
+			? await tx
+					.select({
+						secretId: secretVersions.secretId,
+						encryptedValue: secretVersions.encryptedValue
+					})
 					.from(secretVersions)
 					.where(
 						and(
-							eq(secretVersions.secretId, existing.id),
-							eq(secretVersions.version, currentVersion)
+							inArray(
+								secretVersions.secretId,
+								candidateSecrets.map((s) => s.id)
+							),
+							sql`(${secretVersions.secretId}, ${secretVersions.version}) IN (${sql.join(
+								candidateSecrets.map((s) => {
+									const v = latestVersionMap.get(s.id) ?? 0;
+									return sql`(${s.id}, ${v})`;
+								}),
+								sql`, `
+							)})`
 						)
 					)
-					.limit(1);
+			: [];
 
-				if (latestVersion) {
-					const storedPlaintext = await decryptSecret(dek, latestVersion.encryptedValue);
+		// Decrypt all existing latest values in parallel — no per-secret awaits
+		// in the hot loop below.
+		const decryptedCurrentMap = new Map(
+			await Promise.all(
+				latestValueRows.map(
+					async (r) => [r.secretId, await decryptSecret(dek, r.encryptedValue)] as const
+				)
+			)
+		);
+
+		// Collect what needs to be encrypted so we can batch-encrypt in parallel.
+		const toEncryptNew: { key: string; value: string }[] = [];
+		const toEncryptModified: { secretId: string; currentVersion: number; value: string }[] = [];
+		const secretIdsToDelete: string[] = [];
+		const submittedKeySet = new Set<string>();
+
+		for (const row of rows) {
+			submittedKeySet.add(row.key);
+			const existing = secretMap.get(row.key);
+
+			if (existing) {
+				const currentVersion = latestVersionMap.get(existing.id) ?? 0;
+				const storedPlaintext = decryptedCurrentMap.get(existing.id);
+
+				if (storedPlaintext !== undefined) {
 					if (storedPlaintext !== row.value) {
-						newVersionRecords.push({
-							id: generateId(),
+						toEncryptModified.push({
 							secretId: existing.id,
-							encryptedValue: await encryptSecret(dek, row.value),
-							version: currentVersion + 1
+							currentVersion,
+							value: row.value
 						});
-						secretsToTouch.push(existing.id);
 						stats.modified++;
 					} else {
 						stats.unchanged++;
 					}
 				}
 			} else {
-				// Brand new secret
-				const secretId = generateId();
-				newSecretRecords.push({
-					id: secretId,
-					key: row.key,
-					environmentId: env.id
-				});
-				newVersionRecords.push({
-					id: generateId(),
-					secretId,
-					encryptedValue: await encryptSecret(dek, row.value),
-					version: 1
-				});
+				toEncryptNew.push({ key: row.key, value: row.value });
 				stats.added++;
 			}
 		}
 
 		// Keys present in DB but not in the submission → delete
 		for (const s of existingSecrets) {
-			if (!submittedKeys.has(s.key)) {
+			if (!submittedKeySet.has(s.key)) {
 				secretIdsToDelete.push(s.id);
 				stats.removed++;
 			}
 		}
 
+		// Encrypt all new and modified values in parallel
+		const [encryptedNew, encryptedModified] = await Promise.all([
+			Promise.all(toEncryptNew.map((e) => encryptSecret(dek, e.value))),
+			Promise.all(toEncryptModified.map((e) => encryptSecret(dek, e.value)))
+		]);
+
+		const newSecretRecords: (typeof secrets.$inferInsert)[] = [];
+		const newVersionRecords: (typeof secretVersions.$inferInsert)[] = [];
+		const secretsToTouch: string[] = [];
+
+		for (let i = 0; i < toEncryptNew.length; i++) {
+			const secretId = generateId();
+			newSecretRecords.push({ id: secretId, key: toEncryptNew[i].key, environmentId: env.id });
+			newVersionRecords.push({
+				id: generateId(),
+				secretId,
+				encryptedValue: encryptedNew[i],
+				version: 1
+			});
+		}
+
+		for (let i = 0; i < toEncryptModified.length; i++) {
+			newVersionRecords.push({
+				id: generateId(),
+				secretId: toEncryptModified[i].secretId,
+				encryptedValue: encryptedModified[i],
+				version: toEncryptModified[i].currentVersion + 1
+			});
+			secretsToTouch.push(toEncryptModified[i].secretId);
+		}
+
+		// Apply all mutations
 		if (newSecretRecords.length) {
 			await tx.insert(secrets).values(newSecretRecords);
 		}
@@ -242,7 +291,10 @@ export async function POST({ locals, params, request }) {
 				createdBy: locals.user!.id
 			});
 
-			// Re-query secrets with latest versions for the snapshot
+			// Re-query secrets with latest versions for the snapshot.
+			// We re-query here (rather than reconstructing from the arrays above)
+			// because deletes may have removed rows, ensuring the snapshot is
+			// always an accurate reflection of the post-mutation state.
 			const snapshotSecrets = await tx.query.secrets.findMany({
 				where: eq(secrets.environmentId, env.id),
 				with: {

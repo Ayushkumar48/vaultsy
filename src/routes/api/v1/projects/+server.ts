@@ -44,34 +44,40 @@ export async function POST({ locals, request }) {
 	const projectId = generateId();
 	const { encryptedDek } = await generateDek();
 
-	const newProject = await db
-		.insert(projects)
-		.values({
-			id: projectId,
-			title: title.trim(),
-			userId: locals.user.id,
-			encryptedDek
-		})
-		.returning({
-			id: projects.id,
-			title: projects.title,
-			createdAt: projects.createdAt,
-			updatedAt: projects.updatedAt
-		});
-
-	// Create all four default environments for the new project
 	const environmentsToCreate = EnvironmentType.map((envName) => ({
 		id: generateId(),
 		name: envName,
-		projectId: projectId
+		projectId
 	}));
 
-	await db.insert(environments).values(environmentsToCreate);
+	// Create the project and all default environments atomically so we never
+	// end up with a project that has no environments (or environments without
+	// a parent project) if the connection drops mid-flight.
+	const [newProject] = await db.transaction(async (tx) => {
+		const inserted = await tx
+			.insert(projects)
+			.values({
+				id: projectId,
+				title: title.trim(),
+				userId: locals.user!.id,
+				encryptedDek
+			})
+			.returning({
+				id: projects.id,
+				title: projects.title,
+				createdAt: projects.createdAt,
+				updatedAt: projects.updatedAt
+			});
+
+		await tx.insert(environments).values(environmentsToCreate);
+
+		return inserted;
+	});
 
 	return json(
 		{
 			ok: true,
-			project: newProject[0]
+			project: newProject
 		},
 		{ status: 201 }
 	);
