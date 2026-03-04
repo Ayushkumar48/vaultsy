@@ -9,7 +9,11 @@ import {
 } from '$lib/server/db/schema';
 import { eq, and, inArray, max, sql } from 'drizzle-orm';
 import { decryptDek, decryptSecret, encryptSecret } from '$lib/server/crypto';
-import { assertValidEnv, resolveProject, resolveEnvironment } from '$lib/server/api-helpers';
+import {
+	assertValidEnv,
+	resolveProjectWithWriteAccess,
+	resolveEnvironment
+} from '$lib/server/api-helpers';
 import { generateId } from '$lib/server/utils';
 
 // ---------------------------------------------------------------------------
@@ -44,7 +48,8 @@ export async function POST({ locals, params, request }) {
 		error(400, { message: 'Body must be { versionId: string }.' });
 	}
 
-	const project = await resolveProject(params.id, locals.user.id);
+	// Viewers cannot roll back — only owner and admin
+	const project = await resolveProjectWithWriteAccess(params.id, locals.user.id);
 	const env = await resolveEnvironment(project.id, envName);
 
 	// Load the target version with its secrets, making sure it belongs to this env

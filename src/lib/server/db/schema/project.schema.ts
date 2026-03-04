@@ -1,7 +1,10 @@
-import { EnvironmentType } from '../../../shared/enums';
+import { EnvironmentType, InvitationStatus, MemberRole } from '../../../shared/enums';
 import { relations } from 'drizzle-orm';
 import { index, integer, pgEnum, pgTable, text, timestamp, uniqueIndex } from 'drizzle-orm/pg-core';
 import { user } from './auth.schema';
+
+export const memberRoleEnum = pgEnum('member_role', MemberRole);
+export const invitationStatusEnum = pgEnum('invitation_status', InvitationStatus);
 
 export const environmentEnum = pgEnum('environment_type', EnvironmentType);
 
@@ -106,8 +109,84 @@ export const environmentVersionSecrets = pgTable(
 	]
 );
 
+export const projectMembers = pgTable(
+	'project_members',
+	{
+		id: text('id').primaryKey(),
+		projectId: text('project_id')
+			.references(() => projects.id, { onDelete: 'cascade' })
+			.notNull(),
+		userId: text('user_id')
+			.references(() => user.id, { onDelete: 'cascade' })
+			.notNull(),
+		role: memberRoleEnum('role').notNull().default('viewer'),
+		invitedBy: text('invited_by').references(() => user.id, { onDelete: 'set null' }),
+		createdAt: timestamp('created_at').notNull().defaultNow()
+	},
+	(table) => [
+		uniqueIndex('unique_member_per_project').on(table.projectId, table.userId),
+		index('project_members_project_idx').on(table.projectId),
+		index('project_members_user_idx').on(table.userId)
+	]
+);
+
+export const projectInvitations = pgTable(
+	'project_invitations',
+	{
+		id: text('id').primaryKey(),
+		projectId: text('project_id')
+			.references(() => projects.id, { onDelete: 'cascade' })
+			.notNull(),
+		invitedEmail: text('invited_email').notNull(),
+		role: memberRoleEnum('role').notNull().default('viewer'),
+		hashedToken: text('hashed_token').notNull().unique(),
+		status: invitationStatusEnum('status').notNull().default('pending'),
+		invitedBy: text('invited_by')
+			.references(() => user.id, { onDelete: 'cascade' })
+			.notNull(),
+		expiresAt: timestamp('expires_at').notNull(),
+		acceptedAt: timestamp('accepted_at'),
+		createdAt: timestamp('created_at').notNull().defaultNow()
+	},
+	(table) => [
+		index('project_invitations_project_idx').on(table.projectId),
+		index('project_invitations_email_idx').on(table.invitedEmail),
+		index('project_invitations_hashed_token_idx').on(table.hashedToken),
+		index('project_invitations_status_idx').on(table.status)
+	]
+);
+
 export const projectRelations = relations(projects, ({ many }) => ({
-	environments: many(environments)
+	environments: many(environments),
+	members: many(projectMembers),
+	invitations: many(projectInvitations)
+}));
+
+export const projectMemberRelations = relations(projectMembers, ({ one }) => ({
+	project: one(projects, {
+		fields: [projectMembers.projectId],
+		references: [projects.id]
+	}),
+	user: one(user, {
+		fields: [projectMembers.userId],
+		references: [user.id]
+	}),
+	invitedByUser: one(user, {
+		fields: [projectMembers.invitedBy],
+		references: [user.id],
+		relationName: 'invitedByUser'
+	})
+}));
+
+export const projectInvitationRelations = relations(projectInvitations, ({ one }) => ({
+	project: one(projects, {
+		fields: [projectInvitations.projectId],
+		references: [projects.id]
+	}),
+	invitedByUser: one(user, {
+		fields: [projectInvitations.invitedBy],
+		references: [user.id]
+	})
 }));
 
 export const environmentRelations = relations(environments, ({ one, many }) => ({
@@ -126,6 +205,9 @@ export const secretRelations = relations(secrets, ({ one, many }) => ({
 	}),
 	versions: many(secretVersions)
 }));
+
+export type ProjectMember = typeof projectMembers.$inferSelect;
+export type ProjectInvitation = typeof projectInvitations.$inferSelect;
 
 export const secretVersionRelations = relations(secretVersions, ({ one }) => ({
 	secret: one(secrets, {

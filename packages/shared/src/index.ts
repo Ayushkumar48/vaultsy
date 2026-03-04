@@ -1,2 +1,1 @@
-export { EnvironmentType } from './enums.js';
-export type { Environment } from './enums.js';
+export * from './enums.js';

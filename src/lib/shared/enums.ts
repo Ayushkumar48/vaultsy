@@ -1,2 +1,1 @@
-export { EnvironmentType } from '@vaultsy/shared';
-export type { Environment } from '@vaultsy/shared';
+export * from '@vaultsy/shared';

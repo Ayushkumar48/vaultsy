@@ -3,10 +3,21 @@ import { projects } from '$lib/server/db/schema';
 import { eq } from 'drizzle-orm';
 import { error } from '@sveltejs/kit';
 import { decryptDek, decryptSecret } from '$lib/server/crypto';
+import { resolveProject } from '$lib/server/api-helpers';
+import { auth } from '$lib/server/auth';
 
-export async function load({ params, depends }) {
+export async function load({ params, depends, request }) {
 	depends(`app:project:${params.id}`);
 	const projectId = params.id;
+
+	// Verify the requesting user has access (owner or member)
+	const session = await auth.api.getSession({ headers: request.headers });
+	if (!session?.user) {
+		throw error(401, 'Unauthorized');
+	}
+
+	const resolved = await resolveProject(projectId, session.user.id);
+	const callerRole = resolved.role;
 
 	const projectData = await db.query.projects.findFirst({
 		where: eq(projects.id, projectId),
@@ -55,6 +66,7 @@ export async function load({ params, depends }) {
 
 	return {
 		projectId,
+		callerRole,
 		project: {
 			id: projectData.id,
 			title: projectData.title,

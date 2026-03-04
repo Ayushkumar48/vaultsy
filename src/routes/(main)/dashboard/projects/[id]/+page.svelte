@@ -12,22 +12,40 @@
 	import ArrowLeft from '@lucide/svelte/icons/arrow-left';
 	import PencilLine from '@lucide/svelte/icons/pencil-line';
 	import History from '@lucide/svelte/icons/history';
+	import Users from '@lucide/svelte/icons/users';
 	import { goto, invalidate } from '$app/navigation';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { formatDate } from '$lib/utils';
 	import { toast } from 'svelte-sonner';
 	import VersionHistory from '$lib/components/custom/version-history.svelte';
+	import ProjectMembers from '$lib/components/custom/project-members.svelte';
 	import { rollbackToVersion } from '../new/project.remote';
+	import { onMount } from 'svelte';
 
 	let { data } = $props();
 	const project = $derived(data.project);
 	const projectId = $derived(data.projectId);
+	const callerRole = $derived(data.callerRole);
+	const canWrite = $derived(callerRole === 'owner' || callerRole === 'admin');
 	let visibleSecrets: Record<string, boolean> = $state({});
 	let copiedKey: string | null = $state(null);
+	let activeTab = $state('development');
 
 	let envSubTab: Record<string, 'secrets' | 'history'> = $state(
 		Object.fromEntries(EnvironmentType.map((e: Environment) => [e, 'secrets' as const]))
 	);
+
+	onMount(() => {
+		const tab = page.url.searchParams.get('tab');
+		if (tab) {
+			activeTab = tab;
+		}
+		if (page.url.searchParams.get('joined') === '1') {
+			activeTab = 'team';
+			toast.success(`You joined "${project.title}"! Welcome to the team.`);
+		}
+	});
 
 	async function handleRollback(versionId: string) {
 		try {
@@ -144,15 +162,17 @@
 				</p>
 			</div>
 			<div class="flex gap-2">
-				<Button variant="outline" size="sm" href={`/dashboard/projects/${data.projectId}/edit`}>
-					<PencilLine class="mr-2 h-4 w-4" />
-					Edit
-				</Button>
+				{#if canWrite}
+					<Button variant="outline" size="sm" href={`/dashboard/projects/${data.projectId}/edit`}>
+						<PencilLine class="mr-2 h-4 w-4" />
+						Edit
+					</Button>
+				{/if}
 			</div>
 		</div>
 
-		<Tabs value="development">
-			<TabsList class="grid w-full grid-cols-4">
+		<Tabs bind:value={activeTab}>
+			<TabsList class="grid w-full grid-cols-5">
 				{#each EnvironmentType as env (env)}
 					{@const envData = project.environments.find((e) => e.name === env)}
 					<TabsTrigger value={env} class="capitalize">
@@ -166,6 +186,10 @@
 						{/if}
 					</TabsTrigger>
 				{/each}
+				<TabsTrigger value="team" class="gap-1.5">
+					<Users class="h-3.5 w-3.5" />
+					Team
+				</TabsTrigger>
 			</TabsList>
 
 			{#each EnvironmentType as envName (envName)}
@@ -250,6 +274,16 @@
 										<Download class="mr-2 h-4 w-4" />
 										.NET
 									</Button>
+									{#if canWrite}
+										<Button
+											variant="default"
+											size="sm"
+											href={resolve(`/dashboard/projects/${projectId}/edit`)}
+										>
+											<PencilLine class="mr-2 h-4 w-4" />
+											Edit
+										</Button>
+									{/if}
 								{/if}
 							</div>
 						</CardHeader>
@@ -278,10 +312,17 @@
 									</div>
 									<h3 class="mb-1 text-lg font-semibold">No secrets yet</h3>
 									<p class="mb-4 text-sm text-muted-foreground">
-										Add your first secret to this environment
+										{#if canWrite}
+											Add your first secret to this environment
+										{:else}
+											No secrets have been added to this environment yet.
+										{/if}
 									</p>
-									<Button href={resolve(`/dashboard/projects/${projectId}/edit`)}>Add Secret</Button
-									>
+									{#if canWrite}
+										<Button href={resolve(`/dashboard/projects/${projectId}/edit`)}
+											>Add Secret</Button
+										>
+									{/if}
 								</div>
 							{:else}
 								<div class="space-y-2">
@@ -340,6 +381,11 @@
 					</Card>
 				</TabsContent>
 			{/each}
+			<TabsContent value="team">
+				<div class="mt-4">
+					<ProjectMembers {projectId} />
+				</div>
+			</TabsContent>
 		</Tabs>
 	</div>
 </div>

@@ -9,7 +9,12 @@ import {
 } from '$lib/server/db/schema';
 import { eq, and, inArray, max, sql } from 'drizzle-orm';
 import { decryptDek, decryptSecret, encryptSecret } from '$lib/server/crypto';
-import { assertValidEnv, resolveProject, resolveEnvironment } from '$lib/server/api-helpers';
+import {
+	assertValidEnv,
+	resolveProject,
+	resolveProjectWithWriteAccess,
+	resolveEnvironment
+} from '$lib/server/api-helpers';
 import { generateId } from '$lib/server/utils';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +72,9 @@ export async function POST({ locals, params, request }) {
 	}
 
 	const envName = assertValidEnv(params.env);
+
+	// Viewers cannot push secrets
+	await resolveProjectWithWriteAccess(params.id, locals.user.id);
 
 	// Parse and validate body
 	let body: unknown;

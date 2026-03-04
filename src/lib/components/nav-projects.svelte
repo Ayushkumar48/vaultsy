@@ -4,6 +4,7 @@
 	import FolderIcon from '@lucide/svelte/icons/folder';
 	import FolderOpenIcon from '@lucide/svelte/icons/folder-open';
 	import ForwardIcon from '@lucide/svelte/icons/forward';
+	import UsersIcon from '@lucide/svelte/icons/users';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
@@ -70,6 +71,15 @@
 							onclick={() => goto(resolve(`/dashboard/projects/${item.id}`))}
 						>
 							<span>{index + 1}. {item.title}</span>
+							{#if !item.isOwner}
+								<span
+									class="ml-auto flex items-center gap-0.5 rounded-full bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 group-data-[collapsible=icon]:hidden dark:text-blue-400"
+									title="Shared with you"
+								>
+									<UsersIcon class="h-2.5 w-2.5" />
+									Shared
+								</span>
+							{/if}
 						</Sidebar.MenuButton>
 						<DropdownMenu.Root>
 							<DropdownMenu.Trigger
@@ -83,10 +93,10 @@
 									<span>View Project</span>
 								</DropdownMenu.Item>
 								<DropdownMenu.Item
-									onclick={() => goto(resolve(`/dashboard/projects/${item.id}/share`))}
+									onclick={() => goto(resolve(`/dashboard/projects/${item.id}?tab=team`))}
 								>
 									<ForwardIcon class="text-muted-foreground" />
-									<span>Share Project</span>
+									<span>Share / Team</span>
 								</DropdownMenu.Item>
 								<DropdownMenu.Item
 									onSelect={(e) => {

@@ -1,5 +1,10 @@
 import { error, redirect } from '@sveltejs/kit';
-import { command, form, getRequestEvent } from '$app/server';
+import { command, form, query, getRequestEvent } from '$app/server';
+import {
+	GetEnvironmentHistorySchema,
+	RollbackSchema,
+	GetVersionDiffSchema
+} from '$lib/shared/schema';
 import { db } from '$lib/server/db';
 import {
 	projects,
@@ -16,6 +21,7 @@ import { generateId } from '$lib/server/utils';
 import { EnvironmentType } from '$lib/shared/enums';
 import { and, eq, inArray, max, sql } from 'drizzle-orm';
 import { getProjectNames } from '../../data.remote';
+import { resolveProject, resolveProjectWithWriteAccess } from '$lib/server/api-helpers';
 import { generateDek, encryptSecret, decryptDek, decryptSecret } from '$lib/server/crypto';
 
 async function snapshotEnvironment(
@@ -168,14 +174,23 @@ export const updateProject = form(UpdateProjectSchema, async (data) => {
 
 	if (!session?.user) error(401, 'Unauthorized');
 
+	// Viewers cannot update projects — only owner and admin
+	const resolvedProject = await resolveProjectWithWriteAccess(projectId, session.user.id);
+
 	await db.transaction(async (tx) => {
 		const existingProject = await tx.query.projects.findFirst({
-			where: and(eq(projects.id, projectId), eq(projects.userId, session.user.id))
+			where: eq(projects.id, projectId)
 		});
 
 		if (!existingProject) error(404, 'Project not found');
 
-		const dek = await decryptDek(existingProject.encryptedDek);
+		const dek = await decryptDek(resolvedProject.encryptedDek);
+
+		// Only owner can rename the project
+		const titleChanged = title.trim() !== existingProject.title;
+		if (titleChanged && resolvedProject.role !== 'owner') {
+			error(403, { message: 'Forbidden — only the project owner can rename the project.' });
+		}
 
 		await tx
 			.update(projects)
@@ -363,16 +378,23 @@ export const deleteProject = command(DeleteProjectSchema, async ({ id }) => {
 export type RemoteUpdateProjectType = typeof updateProject;
 export type RemoteCreateProjectType = typeof createProject;
 
-import { query } from '$app/server';
-import {
-	GetEnvironmentHistorySchema,
-	RollbackSchema,
-	GetVersionDiffSchema
-} from '$lib/shared/schema';
-
 export const getEnvironmentHistory = query(
 	GetEnvironmentHistorySchema,
 	async ({ environmentId }) => {
+		const event = getRequestEvent();
+		if (!event) error(500, 'No request event');
+
+		const session = await auth.api.getSession({ headers: event.request.headers });
+		if (!session?.user) error(401, 'Unauthorized');
+
+		// Verify the caller has at least read access to the project this env belongs to
+		const env = await db.query.environments.findFirst({
+			where: eq(environments.id, environmentId),
+			columns: { projectId: true }
+		});
+		if (!env) error(404, 'Environment not found');
+		await resolveProject(environmentId ? env.projectId : '', session.user.id);
+
 		const rows = await db.query.environmentVersions.findMany({
 			where: eq(environmentVersions.environmentId, environmentId),
 			orderBy: (ev, { desc }) => [desc(ev.versionNumber)],
@@ -407,6 +429,12 @@ export type DiffEntry =
 export const getVersionDiff = query(
 	GetVersionDiffSchema,
 	async ({ fromVersionId, toVersionId }) => {
+		const event = getRequestEvent();
+		if (!event) error(500, 'No request event');
+
+		const session = await auth.api.getSession({ headers: event.request.headers });
+		if (!session?.user) error(401, 'Unauthorized');
+
 		const [fromVersion, toVersion] = await Promise.all([
 			db.query.environmentVersions.findFirst({
 				where: eq(environmentVersions.id, fromVersionId),
@@ -432,6 +460,9 @@ export const getVersionDiff = query(
 		});
 
 		if (!environment) error(404, 'Environment not found');
+
+		// Verify caller has read access to this project
+		await resolveProject(environment.project.id, session.user.id);
 
 		const dek = await decryptDek(environment.project.encryptedDek);
 
@@ -493,12 +524,14 @@ export const rollbackToVersion = command(RollbackSchema, async ({ versionId }) =
 
 	if (!targetVersion) error(404, 'Version not found');
 
-	if (targetVersion.environment.project.userId !== session.user.id) {
-		error(403, 'Forbidden');
-	}
+	// Viewers cannot roll back — only owner and admin
+	const resolvedProject = await resolveProjectWithWriteAccess(
+		targetVersion.environment.project.id,
+		session.user.id
+	);
 
 	const project = targetVersion.environment.project;
-	const dek = await decryptDek(project.encryptedDek);
+	const dek = await decryptDek(resolvedProject.encryptedDek);
 
 	const plaintextSecrets = await Promise.all(
 		targetVersion.secrets.map(async (s) => ({

@@ -51,3 +51,29 @@ export const CreateTokenSchema = z.object({
 export const RevokeTokenSchema = z.object({
 	id: z.string().min(1)
 });
+
+export const InviteMemberSchema = z.object({
+	projectId: z.string().min(1),
+	email: z.string().email('Must be a valid email address'),
+	role: z.enum(['admin', 'viewer']).default('viewer')
+});
+
+export const UpdateMemberRoleSchema = z.object({
+	projectId: z.string().min(1),
+	userId: z.string().min(1),
+	role: z.enum(['admin', 'viewer'])
+});
+
+export const RemoveMemberSchema = z.object({
+	projectId: z.string().min(1),
+	userId: z.string().min(1)
+});
+
+export const RevokeInvitationSchema = z.object({
+	invitationId: z.string().min(1),
+	projectId: z.string().min(1)
+});
+
+export const AcceptInvitationSchema = z.object({
+	token: z.string().min(1)
+});
