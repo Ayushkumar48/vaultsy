@@ -206,7 +206,7 @@
 							<!-- Avatar + info -->
 							<div class="flex min-w-0 items-center gap-3">
 								{#if member.image}
-									<img
+									<enhanced:img
 										src={member.image}
 										alt={member.name}
 										class="h-9 w-9 shrink-0 rounded-full object-cover"

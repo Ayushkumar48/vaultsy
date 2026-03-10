@@ -4,7 +4,7 @@
 	import { Button } from '$lib/components/ui/button/index.js';
 	import * as Card from '$lib/components/ui/card/index.js';
 	import { FieldDescription } from '$lib/components/ui/field/index.js';
-	import GalleryVerticalEndIcon from '@lucide/svelte/icons/gallery-vertical-end';
+	import Logo from '$lib/components/custom/logo.svelte';
 	import { signIn } from './auth.remote';
 	import { Spinner } from '$lib/components/ui/spinner';
 </script>
@@ -12,11 +12,7 @@
 <div class="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted p-6 md:p-10">
 	<div class="flex w-full max-w-xl flex-col gap-6">
 		<a href={resolve('/')} class="flex items-center gap-2 self-center font-medium">
-			<div
-				class="flex size-6 items-center justify-center rounded-md bg-primary text-primary-foreground"
-			>
-				<GalleryVerticalEndIcon class="size-4" />
-			</div>
+			<Logo class="size-7" />
 			Vaultsy
 		</a>
 		<Card.Root>

@@ -71,6 +71,7 @@
 
 		<h1 class="text-5xl font-bold tracking-tight sm:text-6xl">
 			Manage Environment Variables
+			<br />
 			<span class="bg-linear-to-r from-primary to-purple-500 bg-clip-text text-transparent">
 				Without the Chaos
 			</span>

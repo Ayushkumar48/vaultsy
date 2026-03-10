@@ -4,11 +4,12 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
+import { enhancedImages } from '@sveltejs/enhanced-img';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit(), devtoolsJson()],
+	plugins: [enhancedImages(), tailwindcss(), sveltekit(), devtoolsJson()],
 	resolve: {
 		alias: {
 			// Point directly at the TS source so Vite never needs to

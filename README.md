@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://vaultsy.vercel.app/logo.webp" alt="Vaultsy Logo" width="100" />
+</p>
+
 # 🔐 Vaultsy
 
 > **Manage Environment Variables Without the Chaos**
