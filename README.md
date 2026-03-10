@@ -1,239 +1,197 @@
-# Vaultsy
+# 🔐 Vaultsy
 
-A self-hostable secrets manager with per-project, per-environment encryption, version history, rollback, and an official CLI — built with SvelteKit, Drizzle ORM, and Neon Postgres.
+> **Manage Environment Variables Without the Chaos**
 
-**Live demo:** https://vaultsy.vercel.app
+A modern, developer-first secrets and environment variable manager. Organize, version, and sync your `.env` configs securely across all environments — with a clean dashboard and a powerful CLI.
 
----
+[![npm version](https://img.shields.io/npm/v/vaultsy-cli)](https://www.npmjs.com/package/vaultsy-cli)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Deployed on Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black)](https://vaultsy.vercel.app)
+[![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20.0.0-brightgreen)](https://nodejs.org)
 
-## What it does
-
-Vaultsy lets you store, manage, and retrieve environment variables across four environments (development, staging, preview, production) with:
-
-- **AES-256-GCM encryption** — every secret value is encrypted with a per-project Data Encryption Key (DEK), which is itself encrypted with a master key. The database never holds plaintext.
-- **Version history** — every save creates an immutable snapshot. You can diff any two versions and roll back in one click.
-- **API tokens** — generate tokens in the dashboard and use them to authenticate the CLI or your own scripts.
-- **Official CLI** — `vaultsy pull`, `vaultsy push`, `vaultsy run` — inject secrets directly into a subprocess without ever writing them to disk.
+🌐 **Live App:** [vaultsy.vercel.app](https://vaultsy.vercel.app)
+📦 **CLI on npm:** [vaultsy-cli](https://www.npmjs.com/package/vaultsy-cli)
 
 ---
 
-## Tech Stack
+## ✨ Features
 
+- 🔒 **Secure Vault** — End-to-end encrypted secrets storage with role-based access control
+- 🌍 **Multi-Environment** — Separate configs for `development`, `staging`, `preview`, and `production`
+- 🔄 **Smart Versioning** — Every change is logged and rollback-able
+- ⚡ **Instant Sync** — Push env changes across environments in seconds
+- 👥 **Team Access** — Invite teammates and manage permissions per project
+- 🖥️ **CLI First** — Pull, push, and inject secrets directly from your terminal
+- 🔗 **CI/CD Ready** — Integrate with any pipeline via the CLI or REST API
+
+---
+
+## 🚀 Quick Start
+
+### 1. Install the CLI
+
+```bash
+npm install -g vaultsy-cli
+# or
+bun add -g vaultsy-cli
+```
+
+### 2. Login
+
+```bash
+vaultsy login
+```
+
+### 3. Pull your environment variables
+
+```bash
+vaultsy pull --project my-app --env production
+```
+
+### 4. Push a local `.env` file
+
+```bash
+vaultsy push --project my-app --env staging
+```
+
+### 5. Inject secrets into a command
+
+```bash
+vaultsy run --project my-app --env production -- node server.js
+```
+
+---
+
+## 📦 CLI Reference
+
+| Command | Description |
+|--------|-------------|
+| `vaultsy login` | Authenticate with your Vaultsy account |
+| `vaultsy pull` | Pull secrets from Vaultsy into a local `.env` file |
+| `vaultsy push` | Push a local `.env` file to Vaultsy |
+| `vaultsy run` | Inject secrets and run a command |
+| `vaultsy list` | List all projects and environments |
+| `vaultsy logout` | Log out of your session |
+
+---
+
+## 🏗️ Tech Stack
+
+### Web App
 | Layer | Technology |
-|---|---|
-| Framework | [SvelteKit](https://kit.svelte.dev) (Svelte 5) |
-| Database | [Neon](https://neon.tech) (serverless Postgres) |
+|-------|-----------|
+| Framework | [SvelteKit](https://kit.svelte.dev) |
+| Styling | [Tailwind CSS](https://tailwindcss.com) |
+| UI Components | [shadcn-svelte](https://www.shadcn-svelte.com) |
 | ORM | [Drizzle ORM](https://orm.drizzle.team) |
-| Auth | [better-auth](https://www.better-auth.com) (GitHub OAuth) |
-| Encryption | Web Crypto API — AES-256-GCM |
-| Styling | [Tailwind CSS v4](https://tailwindcss.com) + [bits-ui](https://bits-ui.com) |
+| Database | [Neon (PostgreSQL)](https://neon.tech) |
+| Auth | [Better Auth](https://www.better-auth.com) (GitHub OAuth) |
 | Deployment | [Vercel](https://vercel.com) |
-| CLI | Node.js + [commander](https://github.com/tj/commander.js) + [tsup](https://tsup.egoist.dev) |
+| Runtime | [Bun](https://bun.sh) |
+
+### CLI (`vaultsy-cli`)
+| Tool | Purpose |
+|------|---------|
+| [Commander](https://github.com/tj/commander.js) | CLI command parsing |
+| [@clack/prompts](https://github.com/bombshell-dev/clack) | Interactive terminal prompts |
+| [Chalk](https://github.com/chalk/chalk) | Terminal colors & styling |
+| [Ora](https://github.com/sindresorhus/ora) | Loading spinners |
+| [tsup](https://tsup.egoist.dev) | TypeScript bundler |
 
 ---
 
-## Project Structure
+## 🗂️ Project Structure
 
 ```
 vaultsy/
-├── src/
-│   ├── lib/
-│   │   ├── server/
-│   │   │   ├── auth.ts          # better-auth config
-│   │   │   ├── crypto.ts        # AES-256-GCM encrypt/decrypt, DEK management
-│   │   │   ├── api-auth.ts      # Bearer token validation for API routes
-│   │   │   ├── api-helpers.ts   # Shared project/env resolvers for API routes
-│   │   │   └── db/
-│   │   │       └── schema/      # Drizzle schema (projects, secrets, versions, tokens)
-│   │   ├── features/
-│   │   │   └── vaultsy.ts       # Shared .env parser and secret utilities
-│   │   └── shared/
-│   │       ├── enums.ts         # EnvironmentType (re-exports from @vaultsy/shared)
-│   │       └── schema.ts        # Zod validation schemas
+├── src/                   # SvelteKit web app
 │   ├── routes/
-│   │   ├── (auth)/              # Sign-in page
-│   │   ├── (main)/dashboard/    # Web UI — projects, settings, version history
-│   │   └── api/v1/              # REST API consumed by the CLI
-│   └── hooks.server.ts          # better-auth + Bearer token middleware
+│   │   ├── api/v1/        # REST API endpoints
+│   │   └── dashboard/     # Dashboard UI
+│   └── lib/               # Shared utilities & DB
 ├── packages/
-│   ├── cli/                     # vaultsy-cli npm package
-│   └── shared/                  # @vaultsy/shared — EnvironmentType constant
-└── drizzle/                     # Migration SQL files
+│   └── cli/               # vaultsy-cli npm package
+├── drizzle/               # DB migrations
+└── static/                # Static assets
 ```
 
 ---
 
-## API Routes
-
-The CLI communicates with the app through these endpoints. All require `Authorization: Bearer <token>`.
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/v1/me` | Verify token, return authenticated user |
-| `GET` | `/api/v1/projects` | List all projects |
-| `POST` | `/api/v1/projects` | Create a new project |
-| `GET` | `/api/v1/projects/[id]/envs/[env]` | Pull decrypted secrets for an environment |
-| `POST` | `/api/v1/projects/[id]/envs/[env]` | Push secrets (full replace + snapshot) |
-| `GET` | `/api/v1/projects/[id]/envs/[env]/versions` | List version history |
-| `POST` | `/api/v1/projects/[id]/envs/[env]/rollback` | Roll back to a version snapshot |
-
----
-
-## Local Development
+## 🔧 Self-Hosting / Local Development
 
 ### Prerequisites
+- Node.js ≥ 20 or Bun
+- A [Neon](https://neon.tech) PostgreSQL database
+- GitHub OAuth app credentials
 
-- [Bun](https://bun.sh) >= 1.0
-- [Node.js](https://nodejs.org) >= 20
-- A [Neon](https://neon.tech) database (free tier works)
-- A [GitHub OAuth App](https://github.com/settings/developers) for auth
+### Setup
 
-### 1. Clone and install
-
-```sh
+```bash
+# Clone the repo
 git clone https://github.com/Ayushkumar48/vaultsy.git
 cd vaultsy
+
+# Install dependencies
 bun install
-```
 
-### 2. Set up environment variables
+# Copy env example and fill in your values
+cp .env.example .env
 
-Create a `.env` file in the project root:
-
-```env
-# Database
-DATABASE_URL=postgresql://...
-
-# App
-ORIGIN=http://localhost:5173
-BETTER_AUTH_SECRET=your-random-secret-here
-
-# GitHub OAuth
-GITHUB_CLIENT_ID=your-github-client-id
-GITHUB_CLIENT_SECRET=your-github-client-secret
-
-# Encryption — generate with:
-# node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-ENCRYPTION_MASTER_KEY=your-64-char-hex-string
-```
-
-> ⚠️ **Never change `ENCRYPTION_MASTER_KEY` after you have secrets stored.** All existing secrets are encrypted with this key. Changing it makes them permanently unreadable.
-
-### 3. Push the database schema
-
-```sh
+# Run database migrations
 bun run db:push
-```
 
-### 4. Start the dev server
-
-```sh
+# Start the dev server
 bun run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173).
-
 ---
 
-## Database Commands
+## 🌱 Environment Variables
 
-```sh
-bun run db:push       # push schema changes directly (development)
-bun run db:generate   # generate migration files
-bun run db:migrate    # run pending migrations
-bun run db:studio     # open Drizzle Studio (visual DB browser)
-```
+See [`.env.example`](./.env.example) for the full list. Key variables:
 
----
-
-## Deployment (Vercel)
-
-1. Push the repo to GitHub
-2. Import the project at [vercel.com/new](https://vercel.com/new)
-3. Add all environment variables from your `.env` file in **Settings → Environment Variables** — especially `ENCRYPTION_MASTER_KEY`
-4. Deploy
-
-The project uses `@sveltejs/adapter-vercel` and works with Vercel's Edge Network out of the box.
-
----
-
-## CLI
-
-The official CLI is published to npm as [`vaultsy-cli`](https://www.npmjs.com/package/vaultsy-cli).
-
-```sh
-npm install -g vaultsy-cli
-vaultsy login
-vaultsy create           # create a new project
-vaultsy set              # manually type in secrets one by one
-vaultsy pull             # pull secrets to a local .env file
-vaultsy push             # push a local .env file up to Vaultsy
-vaultsy run -- node server.js
-```
-
-See [`packages/cli/README.md`](./packages/cli/README.md) for full documentation.
-
-### Build the CLI locally
-
-```sh
-bun run cli:build       # compile shared + CLI with tsup
-bun run cli:run         # run the local build
+```env
+DATABASE_URL=          # Neon PostgreSQL connection string
+BETTER_AUTH_SECRET=    # Auth secret key
+GITHUB_CLIENT_ID=      # GitHub OAuth App client ID
+GITHUB_CLIENT_SECRET=  # GitHub OAuth App client secret
 ```
 
 ---
 
-## How Encryption Works
+## 🛣️ Roadmap
 
-Each project gets a unique **Data Encryption Key (DEK)** generated when the project is created:
-
-```
-Secret value
-    │
-    ▼ encryptSecret(dek, value)        ← AES-256-GCM with random IV
-Encrypted value  ──────────────────────► stored in DB
-```
-
-The DEK itself is never stored in plaintext:
-
-```
-DEK (random 32 bytes)
-    │
-    ▼ aesGcmEncrypt(masterKey, dek)    ← encrypted with ENCRYPTION_MASTER_KEY
-Encrypted DEK  ────────────────────────► stored in DB alongside the project
-```
-
-To read a secret, the server decrypts the DEK with the master key, then uses the DEK to decrypt the secret value. The master key only ever exists in memory, loaded from the environment variable at runtime.
+- [ ] Import from `.env` file via dashboard UI
+- [ ] Webhook notifications on secret changes
+- [ ] Audit logs per project
+- [ ] Support for more OAuth providers
+- [ ] Secret expiry and rotation reminders
+- [ ] VS Code extension
 
 ---
 
-## Version History
+## 🤝 Contributing
 
-Every time you save a project (from the UI or via `vaultsy push`), the app:
+Contributions are welcome! Please open an issue first to discuss what you'd like to change.
 
-1. Diffs the new secrets against the current state
-2. Creates new `secret_versions` rows only for changed values
-3. Takes a full **environment snapshot** (`environment_versions` + `environment_version_secrets`) capturing the complete state of all secrets at that point in time
-
-This means you can roll back to any previous snapshot, and the rollback itself creates a new snapshot — so you can always undo it too.
-
----
-
-## Contributing
-
-```sh
-# Type check the SvelteKit app
-bun run check
-
-# Type check the CLI
-cd packages/cli && npx tsc --noEmit
-
-# Lint and format
-bun run lint
-bun run format
+```bash
+# Fork the repo, then:
+git checkout -b feat/your-feature
+git commit -m "feat: add your feature"
+git push origin feat/your-feature
+# Open a Pull Request
 ```
 
 ---
 
-## License
+## 📄 License
 
 MIT © [Ayush Kumar](https://github.com/Ayushkumar48)
+
+---
+
+<p align="center">
+  Built with ❤️ by <a href="https://github.com/Ayushkumar48">Ayush Kumar</a>
+  <br/>
+  <a href="https://vaultsy.vercel.app">vaultsy.vercel.app</a>
+</p>
