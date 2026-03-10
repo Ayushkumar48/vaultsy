@@ -36,28 +36,39 @@ npm install -g vaultsy-cli
 bun add -g vaultsy-cli
 ```
 
-### 2. Login
+### 2. Authenticate
+
+Create an API token at [vaultsy.vercel.app/dashboard/settings](https://vaultsy.vercel.app/dashboard/settings), then:
 
 ```bash
 vaultsy login
+# or non-interactively:
+vaultsy login --token "$VAULTSY_TOKEN"
 ```
 
-### 3. Pull your environment variables
+### 3. Create a project & pin it to your directory
 
 ```bash
-vaultsy pull --project my-app --env production
+vaultsy create        # create a new project
+vaultsy init          # save project config to vaultsy.json
 ```
 
-### 4. Push a local `.env` file
+### 4. Pull secrets to a local `.env` file
 
 ```bash
-vaultsy push --project my-app --env staging
+vaultsy pull          # interactive, or uses vaultsy.json defaults
 ```
 
-### 5. Inject secrets into a command
+### 5. Push local changes back up
 
 ```bash
-vaultsy run --project my-app --env production -- node server.js
+vaultsy push          # shows a diff before applying
+```
+
+### 6. Run a command with secrets injected — nothing ever touches disk
+
+```bash
+vaultsy run -- node server.js
 ```
 
 ---
@@ -66,12 +77,18 @@ vaultsy run --project my-app --env production -- node server.js
 
 | Command | Description |
 |--------|-------------|
-| `vaultsy login` | Authenticate with your Vaultsy account |
-| `vaultsy pull` | Pull secrets from Vaultsy into a local `.env` file |
-| `vaultsy push` | Push a local `.env` file to Vaultsy |
-| `vaultsy run` | Inject secrets and run a command |
-| `vaultsy list` | List all projects and environments |
-| `vaultsy logout` | Log out of your session |
+| `vaultsy login` | Authenticate with an API token |
+| `vaultsy logout` | Remove stored credentials |
+| `vaultsy whoami` | Show the currently authenticated user |
+| `vaultsy create` | Create a new project |
+| `vaultsy init` | Pin a project to the current directory via `vaultsy.json` |
+| `vaultsy envs` | View secrets across all environments |
+| `vaultsy pull` | Pull secrets to a local `.env` file |
+| `vaultsy push` | Push a local `.env` file to Vaultsy (shows diff first) |
+| `vaultsy set` | Interactively add/update secrets without a local file |
+| `vaultsy run` | Inject secrets into a subprocess — nothing touches disk |
+| `vaultsy history` | List version snapshots for an environment |
+| `vaultsy rollback` | Roll back to a previous version snapshot |
 
 ---
 
@@ -156,6 +173,44 @@ BETTER_AUTH_SECRET=    # Auth secret key
 GITHUB_CLIENT_ID=      # GitHub OAuth App client ID
 GITHUB_CLIENT_SECRET=  # GitHub OAuth App client secret
 ```
+
+---
+
+## 🔐 Security
+
+- API token stored in `~/.vaultsy/config.json` with `0600` permissions — never readable by other users
+- Secret values are **never printed** to stdout unless you explicitly pass `--show-values`
+- `vaultsy run` uses `shell: false` when spawning subprocesses — secrets never appear in `ps` output
+- `vaultsy pull` warns if the output `.env` file is not listed in `.gitignore`
+- All communication uses HTTPS
+
+---
+
+## ⚙️ CI/CD Usage
+
+### GitHub Actions — pull secrets before build
+
+```yaml
+- name: Pull secrets
+  env:
+    VAULTSY_TOKEN: ${{ secrets.VAULTSY_TOKEN }}
+  run: |
+    npx vaultsy-cli login --token "$VAULTSY_TOKEN"
+    npx vaultsy-cli pull <project-id> production --output .env --yes
+```
+
+### GitHub Actions — inject secrets into a command
+
+```yaml
+- name: Run with secrets injected
+  env:
+    VAULTSY_TOKEN: ${{ secrets.VAULTSY_TOKEN }}
+  run: |
+    npx vaultsy-cli login --token "$VAULTSY_TOKEN"
+    npx vaultsy-cli run <project-id> production -- node server.js
+```
+
+> Store your Vaultsy API token as a GitHub Actions secret (`VAULTSY_TOKEN`) under **Settings → Secrets and variables → Actions**.
 
 ---
 
